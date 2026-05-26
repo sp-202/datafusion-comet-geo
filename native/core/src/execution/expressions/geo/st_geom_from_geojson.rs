@@ -18,10 +18,12 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::array::{Array, ArrayRef, BinaryBuilder, StringArray};
+use arrow::array::{ArrayRef, BinaryBuilder};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
-use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
+use datafusion::logical_expr::{
+    ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, TypeSignature, Volatility,
+};
 
 use super::wkb_util::geom_to_wkb;
 
@@ -33,7 +35,14 @@ pub struct StGeomFromGeoJson {
 impl Default for StGeomFromGeoJson {
     fn default() -> Self {
         Self {
-            signature: Signature::exact(vec![DataType::Utf8], Volatility::Immutable),
+            signature: Signature::one_of(
+                vec![
+                    TypeSignature::Exact(vec![DataType::Utf8]),
+                    TypeSignature::Exact(vec![DataType::LargeUtf8]),
+                    TypeSignature::Exact(vec![DataType::Utf8View]),
+                ],
+                Volatility::Immutable,
+            ),
         }
     }
 }
@@ -46,7 +55,12 @@ impl ScalarUDFImpl for StGeomFromGeoJson {
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
         let arrays = ColumnarValue::values_to_arrays(&args.args)?;
-        let col = arrays[0].as_any().downcast_ref::<StringArray>().unwrap();
+        let arr = &arrays[0];
+        let col = arrow::compute::cast(arr, &DataType::Utf8)?;
+        let col = col
+            .as_any()
+            .downcast_ref::<arrow::array::StringArray>()
+            .unwrap();
 
         let mut builder = BinaryBuilder::with_capacity(col.len(), col.len() * 64);
         for v in col.iter() {
