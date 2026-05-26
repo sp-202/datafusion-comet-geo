@@ -18,7 +18,7 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, BinaryArray, BinaryBuilder};
+use arrow::array::{Array, ArrayRef, BinaryArray, BinaryBuilder};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
 use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
@@ -54,9 +54,12 @@ impl ScalarUDFImpl for StFlipCoordinates {
         for b in col.iter() {
             match b {
                 Some(bytes) => {
-                    match wkb_to_geo(read_wkb(bytes).ok()?).ok()
-                        .and_then(|g| geom_to_wkb(&g.map_coords(|c| Coord { x: c.y, y: c.x })).ok())
-                    {
+                    let result = (|| -> Option<Vec<u8>> {
+                        let g = wkb_to_geo(read_wkb(bytes).ok()?).ok()?;
+                        let flipped = g.map_coords(|c| Coord { x: c.y, y: c.x });
+                        geom_to_wkb(&flipped).ok()
+                    })();
+                    match result {
                         Some(wkb) => builder.append_value(&wkb),
                         None => builder.append_null(),
                     }

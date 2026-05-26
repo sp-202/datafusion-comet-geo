@@ -18,7 +18,7 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, BinaryArray, BinaryBuilder};
+use arrow::array::{Array, ArrayRef, BinaryArray, BinaryBuilder};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
 use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
@@ -54,10 +54,12 @@ impl ScalarUDFImpl for StEnvelope {
         for b in col.iter() {
             match b {
                 Some(bytes) => {
-                    match wkb_to_geo(read_wkb(bytes).ok()?).ok()
-                        .and_then(|g| g.bounding_rect())
-                        .and_then(|r| geom_to_wkb(&Geometry::Rect(r)).ok())
-                    {
+                    let result = (|| -> Option<Vec<u8>> {
+                        let g = wkb_to_geo(read_wkb(bytes).ok()?).ok()?;
+                        let r = g.bounding_rect()?;
+                        geom_to_wkb(&Geometry::Rect(r)).ok()
+                    })();
+                    match result {
                         Some(wkb) => builder.append_value(&wkb),
                         None => builder.append_null(),
                     }

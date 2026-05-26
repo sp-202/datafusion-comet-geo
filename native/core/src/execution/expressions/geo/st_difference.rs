@@ -18,7 +18,7 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, BinaryArray, BinaryBuilder};
+use arrow::array::{Array, ArrayRef, BinaryArray, BinaryBuilder};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
 use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
@@ -55,16 +55,14 @@ impl ScalarUDFImpl for StDifference {
         for (b1, b2) in col1.iter().zip(col2.iter()) {
             match (b1, b2) {
                 (Some(bytes1), Some(bytes2)) => {
-                    match (wkb_to_geo(read_wkb(bytes1).ok()?).ok().and_then(as_multipolygon),
-                           wkb_to_geo(read_wkb(bytes2).ok()?).ok().and_then(as_multipolygon))
-                    {
-                        (Some(a), Some(b)) => {
-                            match geom_to_wkb(&Geometry::MultiPolygon(a.difference(&b))).ok() {
-                                Some(wkb) => builder.append_value(&wkb),
-                                None => builder.append_null(),
-                            }
-                        }
-                        _ => builder.append_null(),
+                    let result = (|| -> Option<Vec<u8>> {
+                        let a = as_multipolygon(wkb_to_geo(read_wkb(bytes1).ok()?).ok()?)?;
+                        let b = as_multipolygon(wkb_to_geo(read_wkb(bytes2).ok()?).ok()?)?;
+                        geom_to_wkb(&Geometry::MultiPolygon(a.difference(&b))).ok()
+                    })();
+                    match result {
+                        Some(wkb) => builder.append_value(&wkb),
+                        None => builder.append_null(),
                     }
                 }
                 _ => builder.append_null(),

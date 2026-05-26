@@ -18,11 +18,12 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, BinaryArray, Float64Array};
+use arrow::array::{Array, ArrayRef, BinaryArray, Float64Array};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
 use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
 use geo::EuclideanLength;
+use geo_types::Geometry;
 
 use super::wkb_util::{read_wkb, wkb_to_geo};
 
@@ -52,10 +53,20 @@ impl ScalarUDFImpl for StLength {
         let result: Float64Array = col.iter()
             .map(|b| {
                 let g = wkb_to_geo(read_wkb(b?).ok()?).ok()?;
-                Some(g.euclidean_length())
+                Some(euclidean_length(&g))
             })
             .collect();
 
         Ok(ColumnarValue::Array(Arc::new(result) as ArrayRef))
+    }
+}
+
+fn euclidean_length(geom: &Geometry) -> f64 {
+    match geom {
+        Geometry::Line(l) => l.euclidean_length(),
+        Geometry::LineString(ls) => ls.euclidean_length(),
+        Geometry::MultiLineString(mls) => mls.euclidean_length(),
+        Geometry::GeometryCollection(gc) => gc.0.iter().map(euclidean_length).sum(),
+        _ => 0.0,
     }
 }

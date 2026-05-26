@@ -19,15 +19,14 @@ use std::any::Any;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, BinaryArray, BinaryBuilder};
+use arrow::array::{Array, ArrayRef, BinaryBuilder, StringArray};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
 use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
-use wkb::writer::{write_geometry, WriteOptions};
-use wkb::Endianness;
+use geo_types::Geometry;
 use wkt::Wkt;
 
-use super::wkb_util::wkb_to_geo;
+use super::wkb_util::geom_to_wkb;
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub struct StGeomFromWkt {
@@ -43,49 +42,26 @@ impl Default for StGeomFromWkt {
 }
 
 impl ScalarUDFImpl for StGeomFromWkt {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn name(&self) -> &str {
-        "st_geomfromwkt"
-    }
-
-    fn signature(&self) -> &Signature {
-        &self.signature
-    }
-
-    fn return_type(&self, _arg_types: &[DataType]) -> DataFusionResult<DataType> {
-        Ok(DataType::Binary)
-    }
+    fn as_any(&self) -> &dyn Any { self }
+    fn name(&self) -> &str { "st_geomfromwkt" }
+    fn signature(&self) -> &Signature { &self.signature }
+    fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> { Ok(DataType::Binary) }
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
         let arrays = ColumnarValue::values_to_arrays(&args.args)?;
-        let col = arrays[0]
-            .as_any()
-            .downcast_ref::<arrow::array::StringArray>()
-            .unwrap();
+        let col = arrays[0].as_any().downcast_ref::<StringArray>().unwrap();
 
         let mut builder = BinaryBuilder::with_capacity(col.len(), col.len() * 64);
         for v in col.iter() {
             match v {
                 Some(wkt_str) => {
-                    match Wkt::<f64>::from_str(wkt_str)
-                        .ok()
-                        .and_then(|w| wkb_to_geo(w.into()).ok())
-                    {
-                        Some(geom) => {
-                            let mut buf = Vec::new();
-                            write_geometry(
-                                &mut buf,
-                                &geom,
-                                &WriteOptions {
-                                    endianness: Endianness::LittleEndian,
-                                },
-                            )
-                            .ok();
-                            builder.append_value(&buf);
-                        }
+                    let result = (|| -> Option<Vec<u8>> {
+                        let wkt = Wkt::<f64>::from_str(wkt_str).ok()?;
+                        let geom = Geometry::<f64>::try_from(wkt).ok()?;
+                        geom_to_wkb(&geom).ok()
+                    })();
+                    match result {
+                        Some(bytes) => builder.append_value(&bytes),
                         None => builder.append_null(),
                     }
                 }
@@ -93,8 +69,6 @@ impl ScalarUDFImpl for StGeomFromWkt {
             }
         }
 
-        Ok(ColumnarValue::Array(
-            Arc::new(builder.finish()) as ArrayRef,
-        ))
+        Ok(ColumnarValue::Array(Arc::new(builder.finish()) as ArrayRef))
     }
 }

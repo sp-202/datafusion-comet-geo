@@ -18,7 +18,7 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, BinaryArray, Float64Array};
+use arrow::array::{Array, ArrayRef, BinaryArray, Float64Array};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
 use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
@@ -68,6 +68,7 @@ fn perimeter(geom: &Geometry) -> f64 {
                 + p.interiors().iter().map(|r| r.euclidean_length()).sum::<f64>()
         }
         Geometry::MultiPolygon(mp) => mp.0.iter().map(|p| perimeter(&Geometry::Polygon(p.clone()))).sum(),
+        Geometry::GeometryCollection(gc) => gc.0.iter().map(perimeter).sum(),
         _ => 0.0,
     }
 }

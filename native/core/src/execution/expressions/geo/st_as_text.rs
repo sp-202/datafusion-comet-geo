@@ -18,7 +18,7 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, BinaryArray, StringBuilder};
+use arrow::array::{Array, ArrayRef, BinaryArray, StringBuilder};
 use arrow::datatypes::DataType;
 use datafusion::common::{DataFusionError, Result as DataFusionResult};
 use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
@@ -53,9 +53,10 @@ impl ScalarUDFImpl for StAsText {
             match b {
                 Some(bytes) => {
                     let wkb = read_wkb(bytes)?;
-                    wkt::to_wkt::write_geometry(&mut builder, &wkb)
+                    let mut s = String::new();
+                    wkt::to_wkt::write_geometry(&mut s, &wkb)
                         .map_err(|e| DataFusionError::External(Box::new(e)))?;
-                    builder.append_value("");
+                    builder.append_value(&s);
                 }
                 None => builder.append_null(),
             }

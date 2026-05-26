@@ -18,7 +18,7 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, BinaryArray, BinaryBuilder, Float64Array};
+use arrow::array::{Array, ArrayRef, BinaryArray, BinaryBuilder, Float64Array};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
 use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
@@ -55,13 +55,13 @@ impl ScalarUDFImpl for StBuffer {
         for (b, d) in geom_col.iter().zip(dist_col.iter()) {
             match (b, d) {
                 (Some(bytes), Some(dist)) => {
-                    match wkb_to_geo(read_wkb(bytes).ok()?).ok()
-                        .and_then(|g| {
-                            let style = BufferStyle::new(dist);
-                            let buffered = g.buffer_with_style(style);
-                            geom_to_wkb(&Geometry::MultiPolygon(buffered)).ok()
-                        })
-                    {
+                    let result = (|| -> Option<Vec<u8>> {
+                        let g = wkb_to_geo(read_wkb(bytes).ok()?).ok()?;
+                        let style = BufferStyle::new(dist);
+                        let buffered = g.buffer_with_style(style);
+                        geom_to_wkb(&Geometry::MultiPolygon(buffered)).ok()
+                    })();
+                    match result {
                         Some(wkb) => builder.append_value(&wkb),
                         None => builder.append_null(),
                     }

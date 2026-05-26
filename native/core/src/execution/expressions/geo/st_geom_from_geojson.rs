@@ -18,7 +18,7 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, BinaryBuilder, StringArray};
+use arrow::array::{Array, ArrayRef, BinaryBuilder, StringArray};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
 use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
@@ -52,11 +52,12 @@ impl ScalarUDFImpl for StGeomFromGeoJson {
         for v in col.iter() {
             match v {
                 Some(json_str) => {
-                    match json_str.parse::<geojson::Geometry>()
-                        .ok()
-                        .and_then(|gj| geo::Geometry::<f64>::try_from(&gj).ok())
-                        .and_then(|geom| geom_to_wkb(&geom).ok())
-                    {
+                    let result = (|| -> Option<Vec<u8>> {
+                        let gj: geojson::Geometry = json_str.parse().ok()?;
+                        let geom = geo::Geometry::<f64>::try_from(&gj).ok()?;
+                        geom_to_wkb(&geom).ok()
+                    })();
+                    match result {
                         Some(bytes) => builder.append_value(&bytes),
                         None => builder.append_null(),
                     }

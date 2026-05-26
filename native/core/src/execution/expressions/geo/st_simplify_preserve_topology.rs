@@ -18,11 +18,12 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, BinaryArray, BinaryBuilder, Float64Array};
+use arrow::array::{Array, ArrayRef, BinaryArray, BinaryBuilder, Float64Array};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
 use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
 use geo::SimplifyVwPreserve;
+use geo_types::Geometry;
 
 use super::wkb_util::{geom_to_wkb, read_wkb, wkb_to_geo};
 
@@ -54,9 +55,12 @@ impl ScalarUDFImpl for StSimplifyPreserveTopology {
         for (b, t) in geom_col.iter().zip(tol_col.iter()) {
             match (b, t) {
                 (Some(bytes), Some(tol)) => {
-                    match wkb_to_geo(read_wkb(bytes).ok()?).ok()
-                        .and_then(|g| geom_to_wkb(&g.simplify_vw_preserve(tol)).ok())
-                    {
+                    let result = (|| -> Option<Vec<u8>> {
+                        let g = wkb_to_geo(read_wkb(bytes).ok()?).ok()?;
+                        let simplified = simplify_vw_preserve_geom(&g, tol);
+                        geom_to_wkb(&simplified).ok()
+                    })();
+                    match result {
                         Some(wkb) => builder.append_value(&wkb),
                         None => builder.append_null(),
                     }
@@ -66,5 +70,18 @@ impl ScalarUDFImpl for StSimplifyPreserveTopology {
         }
 
         Ok(ColumnarValue::Array(Arc::new(builder.finish()) as ArrayRef))
+    }
+}
+
+fn simplify_vw_preserve_geom(geom: &Geometry, epsilon: f64) -> Geometry {
+    match geom {
+        Geometry::LineString(ls) => Geometry::LineString(ls.simplify_vw_preserve(&epsilon)),
+        Geometry::MultiLineString(mls) => Geometry::MultiLineString(mls.simplify_vw_preserve(&epsilon)),
+        Geometry::Polygon(p) => Geometry::Polygon(p.simplify_vw_preserve(&epsilon)),
+        Geometry::MultiPolygon(mp) => Geometry::MultiPolygon(mp.simplify_vw_preserve(&epsilon)),
+        Geometry::GeometryCollection(gc) => Geometry::GeometryCollection(
+            geo_types::GeometryCollection(gc.0.iter().map(|g| simplify_vw_preserve_geom(g, epsilon)).collect())
+        ),
+        _ => geom.clone(),
     }
 }
