@@ -26,11 +26,16 @@ import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, ExprCo
 import org.apache.spark.sql.types.{BinaryType, BooleanType, DataType, DoubleType, IntegerType, LongType, StringType}
 import org.apache.spark.unsafe.types.UTF8String
 
+// Marker trait — lets the optimizer rule identify all geo expressions without
+// pattern-matching every case class individually.
+trait CometGeoExpression
+
 // ---- Binary geo predicates -----------------------------------------------
 
 case class StContains(left: Expression, right: Expression)
     extends BinaryExpression
-    with NullIntolerant {
+    with NullIntolerant
+    with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = BooleanType
   override def nullSafeEval(g1: Any, g2: Any): Any =
@@ -49,7 +54,8 @@ case class StContains(left: Expression, right: Expression)
 
 case class StIntersects(left: Expression, right: Expression)
     extends BinaryExpression
-    with NullIntolerant {
+    with NullIntolerant
+    with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = BooleanType
   override def nullSafeEval(g1: Any, g2: Any): Any =
@@ -68,7 +74,8 @@ case class StIntersects(left: Expression, right: Expression)
 
 case class StWithin(left: Expression, right: Expression)
     extends BinaryExpression
-    with NullIntolerant {
+    with NullIntolerant
+    with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = BooleanType
   override def nullSafeEval(g1: Any, g2: Any): Any =
@@ -87,7 +94,8 @@ case class StWithin(left: Expression, right: Expression)
 
 case class StDistance(left: Expression, right: Expression)
     extends BinaryExpression
-    with NullIntolerant {
+    with NullIntolerant
+    with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = DoubleType
   override def nullSafeEval(g1: Any, g2: Any): Any =
@@ -106,7 +114,8 @@ case class StDistance(left: Expression, right: Expression)
 
 case class StUnion(left: Expression, right: Expression)
     extends BinaryExpression
-    with NullIntolerant {
+    with NullIntolerant
+    with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g1: Any, g2: Any): Any =
@@ -125,7 +134,8 @@ case class StUnion(left: Expression, right: Expression)
 
 case class StIntersection(left: Expression, right: Expression)
     extends BinaryExpression
-    with NullIntolerant {
+    with NullIntolerant
+    with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g1: Any, g2: Any): Any =
@@ -145,7 +155,8 @@ case class StIntersection(left: Expression, right: Expression)
 // StPoint takes two Double arguments (x, y) and returns a WKB geometry
 case class StPoint(left: Expression, right: Expression)
     extends BinaryExpression
-    with NullIntolerant {
+    with NullIntolerant
+    with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = BinaryType
   override def nullSafeEval(x: Any, y: Any): Any =
@@ -164,7 +175,7 @@ case class StPoint(left: Expression, right: Expression)
 
 // ---- Unary geo functions --------------------------------------------------
 
-case class StArea(child: Expression) extends UnaryExpression with NullIntolerant {
+case class StArea(child: Expression) extends UnaryExpression with NullIntolerant with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = DoubleType
   override def nullSafeEval(g: Any): Any =
@@ -178,7 +189,7 @@ case class StArea(child: Expression) extends UnaryExpression with NullIntolerant
     copy(child = newChild)
 }
 
-case class StCentroid(child: Expression) extends UnaryExpression with NullIntolerant {
+case class StCentroid(child: Expression) extends UnaryExpression with NullIntolerant with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g: Any): Any =
@@ -192,7 +203,7 @@ case class StCentroid(child: Expression) extends UnaryExpression with NullIntole
     copy(child = newChild)
 }
 
-case class StLength(child: Expression) extends UnaryExpression with NullIntolerant {
+case class StLength(child: Expression) extends UnaryExpression with NullIntolerant with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = DoubleType
   override def nullSafeEval(g: Any): Any =
@@ -206,7 +217,7 @@ case class StLength(child: Expression) extends UnaryExpression with NullIntolera
     copy(child = newChild)
 }
 
-case class StIsEmpty(child: Expression) extends UnaryExpression with NullIntolerant {
+case class StIsEmpty(child: Expression) extends UnaryExpression with NullIntolerant with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = BooleanType
   override def nullSafeEval(g: Any): Any =
@@ -220,7 +231,7 @@ case class StIsEmpty(child: Expression) extends UnaryExpression with NullIntoler
     copy(child = newChild)
 }
 
-case class StGeometryType(child: Expression) extends UnaryExpression with NullIntolerant {
+case class StGeometryType(child: Expression) extends UnaryExpression with NullIntolerant with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = StringType
   override def nullSafeEval(g: Any): Any =
@@ -237,7 +248,7 @@ case class StGeometryType(child: Expression) extends UnaryExpression with NullIn
     copy(child = newChild)
 }
 
-case class StNumPoints(child: Expression) extends UnaryExpression with NullIntolerant {
+case class StNumPoints(child: Expression) extends UnaryExpression with NullIntolerant with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = LongType
   override def nullSafeEval(g: Any): Any =
@@ -251,7 +262,7 @@ case class StNumPoints(child: Expression) extends UnaryExpression with NullIntol
     copy(child = newChild)
 }
 
-case class StX(child: Expression) extends UnaryExpression with NullIntolerant {
+case class StX(child: Expression) extends UnaryExpression with NullIntolerant with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = DoubleType
   override def nullSafeEval(g: Any): Any =
@@ -265,7 +276,7 @@ case class StX(child: Expression) extends UnaryExpression with NullIntolerant {
     copy(child = newChild)
 }
 
-case class StY(child: Expression) extends UnaryExpression with NullIntolerant {
+case class StY(child: Expression) extends UnaryExpression with NullIntolerant with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = DoubleType
   override def nullSafeEval(g: Any): Any =
@@ -279,7 +290,7 @@ case class StY(child: Expression) extends UnaryExpression with NullIntolerant {
     copy(child = newChild)
 }
 
-case class StEnvelope(child: Expression) extends UnaryExpression with NullIntolerant {
+case class StEnvelope(child: Expression) extends UnaryExpression with NullIntolerant with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g: Any): Any =
@@ -293,7 +304,7 @@ case class StEnvelope(child: Expression) extends UnaryExpression with NullIntole
     copy(child = newChild)
 }
 
-case class StConvexHull(child: Expression) extends UnaryExpression with NullIntolerant {
+case class StConvexHull(child: Expression) extends UnaryExpression with NullIntolerant with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g: Any): Any =
@@ -311,7 +322,8 @@ case class StConvexHull(child: Expression) extends UnaryExpression with NullInto
 
 case class StSimplify(left: Expression, right: Expression)
     extends BinaryExpression
-    with NullIntolerant {
+    with NullIntolerant
+    with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g: Any, t: Any): Any =
@@ -330,7 +342,8 @@ case class StSimplify(left: Expression, right: Expression)
 
 case class StBuffer(left: Expression, right: Expression)
     extends BinaryExpression
-    with NullIntolerant {
+    with NullIntolerant
+    with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g: Any, d: Any): Any =
@@ -350,7 +363,7 @@ case class StBuffer(left: Expression, right: Expression)
 // ---- Constructors --------------------------------------------------------
 
 // StGeomFromWkt takes a String (WKT) and returns Binary (WKB)
-case class StGeomFromWkt(child: Expression) extends UnaryExpression with NullIntolerant {
+case class StGeomFromWkt(child: Expression) extends UnaryExpression with NullIntolerant with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g: Any): Any =
@@ -367,7 +380,7 @@ case class StGeomFromWkt(child: Expression) extends UnaryExpression with NullInt
 }
 
 // StGeomFromGeoJson takes a String (JSON) and returns Binary (WKB)
-case class StGeomFromGeoJson(child: Expression) extends UnaryExpression with NullIntolerant {
+case class StGeomFromGeoJson(child: Expression) extends UnaryExpression with NullIntolerant with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g: Any): Any =
@@ -385,7 +398,8 @@ case class StGeomFromGeoJson(child: Expression) extends UnaryExpression with Nul
 
 case class StMakeEnvelope(xmin: Expression, ymin: Expression, xmax: Expression, ymax: Expression)
     extends Expression
-    with NullIntolerant {
+    with NullIntolerant
+    with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = BinaryType
   override def nullable: Boolean = true
@@ -417,7 +431,8 @@ case class StMakeEnvelope(xmin: Expression, ymin: Expression, xmax: Expression, 
 
 case class StMakeLine(left: Expression, right: Expression)
     extends BinaryExpression
-    with NullIntolerant {
+    with NullIntolerant
+    with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g1: Any, g2: Any): Any =
@@ -437,7 +452,7 @@ case class StMakeLine(left: Expression, right: Expression)
 // ---- Serializers ---------------------------------------------------------
 
 // StAsText takes Binary (WKB) and returns String (WKT)
-case class StAsText(child: Expression) extends UnaryExpression with NullIntolerant {
+case class StAsText(child: Expression) extends UnaryExpression with NullIntolerant with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = StringType
   override def nullSafeEval(g: Any): Any =
@@ -454,7 +469,7 @@ case class StAsText(child: Expression) extends UnaryExpression with NullIntolera
 }
 
 // StAsGeoJson takes Binary (WKB) and returns String (JSON)
-case class StAsGeoJson(child: Expression) extends UnaryExpression with NullIntolerant {
+case class StAsGeoJson(child: Expression) extends UnaryExpression with NullIntolerant with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = StringType
   override def nullSafeEval(g: Any): Any =
@@ -474,7 +489,8 @@ case class StAsGeoJson(child: Expression) extends UnaryExpression with NullIntol
 
 case class StCovers(left: Expression, right: Expression)
     extends BinaryExpression
-    with NullIntolerant {
+    with NullIntolerant
+    with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = BooleanType
   override def nullSafeEval(g1: Any, g2: Any): Any =
@@ -493,7 +509,8 @@ case class StCovers(left: Expression, right: Expression)
 
 case class StCoveredBy(left: Expression, right: Expression)
     extends BinaryExpression
-    with NullIntolerant {
+    with NullIntolerant
+    with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = BooleanType
   override def nullSafeEval(g1: Any, g2: Any): Any =
@@ -512,7 +529,8 @@ case class StCoveredBy(left: Expression, right: Expression)
 
 case class StEquals(left: Expression, right: Expression)
     extends BinaryExpression
-    with NullIntolerant {
+    with NullIntolerant
+    with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = BooleanType
   override def nullSafeEval(g1: Any, g2: Any): Any =
@@ -531,7 +549,8 @@ case class StEquals(left: Expression, right: Expression)
 
 case class StTouches(left: Expression, right: Expression)
     extends BinaryExpression
-    with NullIntolerant {
+    with NullIntolerant
+    with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = BooleanType
   override def nullSafeEval(g1: Any, g2: Any): Any =
@@ -550,7 +569,8 @@ case class StTouches(left: Expression, right: Expression)
 
 case class StCrosses(left: Expression, right: Expression)
     extends BinaryExpression
-    with NullIntolerant {
+    with NullIntolerant
+    with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = BooleanType
   override def nullSafeEval(g1: Any, g2: Any): Any =
@@ -569,7 +589,8 @@ case class StCrosses(left: Expression, right: Expression)
 
 case class StDisjoint(left: Expression, right: Expression)
     extends BinaryExpression
-    with NullIntolerant {
+    with NullIntolerant
+    with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = BooleanType
   override def nullSafeEval(g1: Any, g2: Any): Any =
@@ -588,7 +609,8 @@ case class StDisjoint(left: Expression, right: Expression)
 
 case class StOverlaps(left: Expression, right: Expression)
     extends BinaryExpression
-    with NullIntolerant {
+    with NullIntolerant
+    with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = BooleanType
   override def nullSafeEval(g1: Any, g2: Any): Any =
@@ -609,7 +631,8 @@ case class StOverlaps(left: Expression, right: Expression)
 
 case class StDistanceSphere(left: Expression, right: Expression)
     extends BinaryExpression
-    with NullIntolerant {
+    with NullIntolerant
+    with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = DoubleType
   override def nullSafeEval(g1: Any, g2: Any): Any =
@@ -626,7 +649,7 @@ case class StDistanceSphere(left: Expression, right: Expression)
       newRight: Expression): Expression = copy(left = newLeft, right = newRight)
 }
 
-case class StPerimeter(child: Expression) extends UnaryExpression with NullIntolerant {
+case class StPerimeter(child: Expression) extends UnaryExpression with NullIntolerant with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = DoubleType
   override def nullSafeEval(g: Any): Any =
@@ -642,7 +665,8 @@ case class StPerimeter(child: Expression) extends UnaryExpression with NullIntol
 
 case class StHausdorffDistance(left: Expression, right: Expression)
     extends BinaryExpression
-    with NullIntolerant {
+    with NullIntolerant
+    with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = DoubleType
   override def nullSafeEval(g1: Any, g2: Any): Any =
@@ -663,7 +687,8 @@ case class StHausdorffDistance(left: Expression, right: Expression)
 
 case class StSimplifyPreserveTopology(left: Expression, right: Expression)
     extends BinaryExpression
-    with NullIntolerant {
+    with NullIntolerant
+    with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g1: Any, g2: Any): Any =
@@ -682,7 +707,7 @@ case class StSimplifyPreserveTopology(left: Expression, right: Expression)
       newRight: Expression): Expression = copy(left = newLeft, right = newRight)
 }
 
-case class StFlipCoordinates(child: Expression) extends UnaryExpression with NullIntolerant {
+case class StFlipCoordinates(child: Expression) extends UnaryExpression with NullIntolerant with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g: Any): Any =
@@ -698,7 +723,7 @@ case class StFlipCoordinates(child: Expression) extends UnaryExpression with Nul
     copy(child = newChild)
 }
 
-case class StBoundary(child: Expression) extends UnaryExpression with NullIntolerant {
+case class StBoundary(child: Expression) extends UnaryExpression with NullIntolerant with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g: Any): Any =
@@ -716,7 +741,8 @@ case class StBoundary(child: Expression) extends UnaryExpression with NullIntole
 
 case class StDifference(left: Expression, right: Expression)
     extends BinaryExpression
-    with NullIntolerant {
+    with NullIntolerant
+    with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g1: Any, g2: Any): Any =
@@ -735,7 +761,8 @@ case class StDifference(left: Expression, right: Expression)
 
 case class StSymDifference(left: Expression, right: Expression)
     extends BinaryExpression
-    with NullIntolerant {
+    with NullIntolerant
+    with CometGeoExpression {
   override def foldable: Boolean = false
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g1: Any, g2: Any): Any =

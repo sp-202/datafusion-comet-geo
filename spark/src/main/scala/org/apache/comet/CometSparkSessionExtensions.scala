@@ -33,7 +33,7 @@ import org.apache.spark.sql.internal.SQLConf
 
 import org.apache.comet.CometConf._
 import org.apache.comet.expressions.GeoExpressions
-import org.apache.comet.rules.{CometExecRule, CometPlanAdaptiveDynamicPruningFilters, CometReuseSubquery, CometScanRule, CometSpark34AqeDppFallbackRule, EliminateRedundantTransitions}
+import org.apache.comet.rules.{CometExecRule, CometGeoPreAggregateRule, CometPlanAdaptiveDynamicPruningFilters, CometReuseSubquery, CometScanRule, CometSpark34AqeDppFallbackRule, EliminateRedundantTransitions}
 import org.apache.comet.shims.ShimCometSparkSessionExtensions
 
 /**
@@ -128,6 +128,7 @@ class CometSparkSessionExtensions
     extensions.injectFunction(GeoExpressions.stBoundaryInfo)
     extensions.injectFunction(GeoExpressions.stDifferenceInfo)
     extensions.injectFunction(GeoExpressions.stSymDifferenceInfo)
+    extensions.injectOptimizerRule { session => CometGeoPreAggregateRule(session) }
     extensions.injectColumnar { session => CometScanColumnar(session) }
     extensions.injectColumnar { session => CometExecColumnar(session) }
     // Pre-3.5 only: tag AQE DPP regions so the conversion rules below leave them Spark-native.
