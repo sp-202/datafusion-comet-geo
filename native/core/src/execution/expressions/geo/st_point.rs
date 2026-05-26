@@ -18,12 +18,13 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::array::{Array, ArrayRef, Decimal128Array, Float64Array, StringArray};
+use arrow::array::{Array, ArrayRef, BinaryBuilder, Decimal128Array, Float64Array};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
-use datafusion::logical_expr::{
-    ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility,
-};
+use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
+use geo_types::{Geometry, Point};
+
+use super::wkb_util::geom_to_wkb;
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub struct StPoint {
@@ -39,37 +40,30 @@ impl Default for StPoint {
 }
 
 impl ScalarUDFImpl for StPoint {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn name(&self) -> &str {
-        "st_point"
-    }
-
-    fn signature(&self) -> &Signature {
-        &self.signature
-    }
-
-    fn return_type(&self, _arg_types: &[DataType]) -> DataFusionResult<DataType> {
-        Ok(DataType::Utf8)
-    }
+    fn as_any(&self) -> &dyn Any { self }
+    fn name(&self) -> &str { "st_point" }
+    fn signature(&self) -> &Signature { &self.signature }
+    fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> { Ok(DataType::Binary) }
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
         let arrays = ColumnarValue::values_to_arrays(&args.args)?;
         let xs = extract_f64_col(&arrays[0]);
         let ys = extract_f64_col(&arrays[1]);
 
-        let result: StringArray = xs
-            .iter()
-            .zip(ys.iter())
-            .map(|(x, y)| {
-                let (x, y) = ((*x)?, (*y)?);
-                Some(format!("POINT({} {})", x, y))
-            })
-            .collect();
+        let mut builder = BinaryBuilder::with_capacity(xs.len(), xs.len() * 21);
+        for (x, y) in xs.iter().zip(ys.iter()) {
+            match (*x, *y) {
+                (Some(x), Some(y)) => {
+                    match geom_to_wkb(&Geometry::Point(Point::new(x, y))).ok() {
+                        Some(wkb) => builder.append_value(&wkb),
+                        None => builder.append_null(),
+                    }
+                }
+                _ => builder.append_null(),
+            }
+        }
 
-        Ok(ColumnarValue::Array(Arc::new(result) as ArrayRef))
+        Ok(ColumnarValue::Array(Arc::new(builder.finish()) as ArrayRef))
     }
 }
 
@@ -82,10 +76,7 @@ fn extract_f64_col(arr: &dyn Array) -> Vec<Option<f64>> {
             DataType::Decimal128(_, s) => *s as i32,
             _ => 0,
         };
-        return a
-            .iter()
-            .map(|v| v.map(|n| (n as f64) / 10f64.powi(scale)))
-            .collect();
+        return a.iter().map(|v| v.map(|n| (n as f64) / 10f64.powi(scale))).collect();
     }
     vec![None; arr.len()]
 }

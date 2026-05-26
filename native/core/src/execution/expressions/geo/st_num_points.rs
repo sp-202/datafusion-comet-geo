@@ -18,14 +18,13 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, Int64Array, StringArray};
+use arrow::array::{ArrayRef, BinaryArray, Int64Array};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
-use datafusion::logical_expr::{
-    ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility,
-};
+use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
 use geo::CoordsIter;
-use wkt::TryFromWkt;
+
+use super::wkb_util::{read_wkb, wkb_to_geo};
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub struct StNumPoints {
@@ -35,38 +34,25 @@ pub struct StNumPoints {
 impl Default for StNumPoints {
     fn default() -> Self {
         Self {
-            signature: Signature::exact(vec![DataType::Utf8], Volatility::Immutable),
+            signature: Signature::exact(vec![DataType::Binary], Volatility::Immutable),
         }
     }
 }
 
 impl ScalarUDFImpl for StNumPoints {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn name(&self) -> &str {
-        "st_numpoints"
-    }
-
-    fn signature(&self) -> &Signature {
-        &self.signature
-    }
-
-    fn return_type(&self, _arg_types: &[DataType]) -> DataFusionResult<DataType> {
-        Ok(DataType::Int64)
-    }
+    fn as_any(&self) -> &dyn Any { self }
+    fn name(&self) -> &str { "st_numpoints" }
+    fn signature(&self) -> &Signature { &self.signature }
+    fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> { Ok(DataType::Int64) }
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
-        let args = ColumnarValue::values_to_arrays(&args.args)?;
-        let geom_col = args[0].as_any().downcast_ref::<StringArray>().unwrap();
+        let arrays = ColumnarValue::values_to_arrays(&args.args)?;
+        let col = arrays[0].as_any().downcast_ref::<BinaryArray>().unwrap();
 
-        let result: Int64Array = geom_col
-            .iter()
-            .map(|g| {
-                let wkt = g?;
-                let geom = geo::Geometry::<f64>::try_from_wkt_str(wkt).ok()?;
-                Some(geom.coords_count() as i64)
+        let result: Int64Array = col.iter()
+            .map(|b| {
+                let g = wkb_to_geo(read_wkb(b?).ok()?).ok()?;
+                Some(g.coords_count() as i64)
             })
             .collect();
 

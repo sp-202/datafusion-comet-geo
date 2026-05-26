@@ -18,14 +18,13 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, BooleanArray, StringArray};
+use arrow::array::{ArrayRef, BinaryArray, BooleanArray};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
-use datafusion::logical_expr::{
-    ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility,
-};
+use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
 use geo::relate::Relate;
-use wkt::TryFromWkt;
+
+use super::wkb_util::{read_wkb, wkb_to_geo};
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub struct StIntersects {
@@ -35,47 +34,27 @@ pub struct StIntersects {
 impl Default for StIntersects {
     fn default() -> Self {
         Self {
-            signature: Signature::exact(
-                vec![DataType::Utf8, DataType::Utf8],
-                Volatility::Immutable,
-            ),
+            signature: Signature::exact(vec![DataType::Binary, DataType::Binary], Volatility::Immutable),
         }
     }
 }
 
 impl ScalarUDFImpl for StIntersects {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn name(&self) -> &str {
-        "st_intersects"
-    }
-
-    fn signature(&self) -> &Signature {
-        &self.signature
-    }
-
-    fn return_type(&self, _arg_types: &[DataType]) -> DataFusionResult<DataType> {
-        Ok(DataType::Boolean)
-    }
+    fn as_any(&self) -> &dyn Any { self }
+    fn name(&self) -> &str { "st_intersects" }
+    fn signature(&self) -> &Signature { &self.signature }
+    fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> { Ok(DataType::Boolean) }
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
-        let args = ColumnarValue::values_to_arrays(&args.args)?;
-        let geom1 = args[0].as_any().downcast_ref::<StringArray>().unwrap();
-        let geom2 = args[1].as_any().downcast_ref::<StringArray>().unwrap();
+        let arrays = ColumnarValue::values_to_arrays(&args.args)?;
+        let col1 = arrays[0].as_any().downcast_ref::<BinaryArray>().unwrap();
+        let col2 = arrays[1].as_any().downcast_ref::<BinaryArray>().unwrap();
 
-        let result: BooleanArray = geom1
-            .iter()
-            .zip(geom2.iter())
-            .map(|(g1, g2)| match (g1, g2) {
-                (Some(g1), Some(g2)) => {
-                    let a = geo::Geometry::<f64>::try_from_wkt_str(g1).ok()?;
-                    let b = geo::Geometry::<f64>::try_from_wkt_str(g2).ok()?;
-                    // DE-9IM: NOT Disjoint — any part of a shares space with any part of b.
-                    Some(!a.relate(&b).is_disjoint())
-                }
-                _ => None,
+        let result: BooleanArray = col1.iter().zip(col2.iter())
+            .map(|(b1, b2)| {
+                let g1 = wkb_to_geo(read_wkb(b1?).ok()?).ok()?;
+                let g2 = wkb_to_geo(read_wkb(b2?).ok()?).ok()?;
+                Some(g1.relate(&g2).is_intersects())
             })
             .collect();
 

@@ -18,14 +18,14 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, StringArray};
+use arrow::array::{ArrayRef, BinaryArray, BinaryBuilder};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
-use datafusion::logical_expr::{
-    ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility,
-};
+use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
 use geo::ConvexHull;
-use wkt::{ToWkt, TryFromWkt};
+use geo_types::Geometry;
+
+use super::wkb_util::{geom_to_wkb, read_wkb, wkb_to_geo};
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub struct StConvexHull {
@@ -35,42 +35,36 @@ pub struct StConvexHull {
 impl Default for StConvexHull {
     fn default() -> Self {
         Self {
-            signature: Signature::exact(vec![DataType::Utf8], Volatility::Immutable),
+            signature: Signature::exact(vec![DataType::Binary], Volatility::Immutable),
         }
     }
 }
 
 impl ScalarUDFImpl for StConvexHull {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn name(&self) -> &str {
-        "st_convexhull"
-    }
-
-    fn signature(&self) -> &Signature {
-        &self.signature
-    }
-
-    fn return_type(&self, _arg_types: &[DataType]) -> DataFusionResult<DataType> {
-        Ok(DataType::Utf8)
-    }
+    fn as_any(&self) -> &dyn Any { self }
+    fn name(&self) -> &str { "st_convexhull" }
+    fn signature(&self) -> &Signature { &self.signature }
+    fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> { Ok(DataType::Binary) }
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
-        let args = ColumnarValue::values_to_arrays(&args.args)?;
-        let geom_col = args[0].as_any().downcast_ref::<StringArray>().unwrap();
+        let arrays = ColumnarValue::values_to_arrays(&args.args)?;
+        let col = arrays[0].as_any().downcast_ref::<BinaryArray>().unwrap();
 
-        let result: StringArray = geom_col
-            .iter()
-            .map(|g| {
-                let wkt = g?;
-                let geom = geo::Geometry::<f64>::try_from_wkt_str(wkt).ok()?;
-                let hull = geom.convex_hull();
-                Some(geo::Geometry::from(hull).wkt_string())
-            })
-            .collect();
+        let mut builder = BinaryBuilder::with_capacity(col.len(), col.len() * 64);
+        for b in col.iter() {
+            match b {
+                Some(bytes) => {
+                    match wkb_to_geo(read_wkb(bytes).ok()?).ok()
+                        .and_then(|g| geom_to_wkb(&Geometry::Polygon(g.convex_hull())).ok())
+                    {
+                        Some(wkb) => builder.append_value(&wkb),
+                        None => builder.append_null(),
+                    }
+                }
+                None => builder.append_null(),
+            }
+        }
 
-        Ok(ColumnarValue::Array(Arc::new(result) as ArrayRef))
+        Ok(ColumnarValue::Array(Arc::new(builder.finish()) as ArrayRef))
     }
 }

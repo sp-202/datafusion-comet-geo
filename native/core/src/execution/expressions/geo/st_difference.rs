@@ -18,14 +18,14 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, StringArray};
+use arrow::array::{ArrayRef, BinaryArray, BinaryBuilder};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
-use datafusion::logical_expr::{
-    ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility,
-};
+use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
 use geo::BooleanOps;
-use wkt::{ToWkt, TryFromWkt};
+use geo_types::{Geometry, MultiPolygon};
+
+use super::wkb_util::{geom_to_wkb, read_wkb, wkb_to_geo};
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub struct StDifference {
@@ -35,54 +35,50 @@ pub struct StDifference {
 impl Default for StDifference {
     fn default() -> Self {
         Self {
-            signature: Signature::exact(
-                vec![DataType::Utf8, DataType::Utf8],
-                Volatility::Immutable,
-            ),
+            signature: Signature::exact(vec![DataType::Binary, DataType::Binary], Volatility::Immutable),
         }
     }
 }
 
 impl ScalarUDFImpl for StDifference {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn name(&self) -> &str {
-        "st_difference"
-    }
-
-    fn signature(&self) -> &Signature {
-        &self.signature
-    }
-
-    fn return_type(&self, _arg_types: &[DataType]) -> DataFusionResult<DataType> {
-        Ok(DataType::Utf8)
-    }
+    fn as_any(&self) -> &dyn Any { self }
+    fn name(&self) -> &str { "st_difference" }
+    fn signature(&self) -> &Signature { &self.signature }
+    fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> { Ok(DataType::Binary) }
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
         let arrays = ColumnarValue::values_to_arrays(&args.args)?;
-        let g1s = arrays[0].as_any().downcast_ref::<StringArray>().unwrap();
-        let g2s = arrays[1].as_any().downcast_ref::<StringArray>().unwrap();
+        let col1 = arrays[0].as_any().downcast_ref::<BinaryArray>().unwrap();
+        let col2 = arrays[1].as_any().downcast_ref::<BinaryArray>().unwrap();
 
-        let result: StringArray = g1s
-            .iter()
-            .zip(g2s.iter())
-            .map(|(w1, w2)| {
-                let a = as_multipolygon(w1?)?;
-                let b = as_multipolygon(w2?)?;
-                Some(a.difference(&b).wkt_string())
-            })
-            .collect();
+        let mut builder = BinaryBuilder::with_capacity(col1.len(), col1.len() * 128);
+        for (b1, b2) in col1.iter().zip(col2.iter()) {
+            match (b1, b2) {
+                (Some(bytes1), Some(bytes2)) => {
+                    match (wkb_to_geo(read_wkb(bytes1).ok()?).ok().and_then(as_multipolygon),
+                           wkb_to_geo(read_wkb(bytes2).ok()?).ok().and_then(as_multipolygon))
+                    {
+                        (Some(a), Some(b)) => {
+                            match geom_to_wkb(&Geometry::MultiPolygon(a.difference(&b))).ok() {
+                                Some(wkb) => builder.append_value(&wkb),
+                                None => builder.append_null(),
+                            }
+                        }
+                        _ => builder.append_null(),
+                    }
+                }
+                _ => builder.append_null(),
+            }
+        }
 
-        Ok(ColumnarValue::Array(Arc::new(result) as ArrayRef))
+        Ok(ColumnarValue::Array(Arc::new(builder.finish()) as ArrayRef))
     }
 }
 
-fn as_multipolygon(wkt: &str) -> Option<geo::MultiPolygon<f64>> {
-    match geo::Geometry::<f64>::try_from_wkt_str(wkt).ok()? {
-        geo::Geometry::Polygon(p) => Some(geo::MultiPolygon(vec![p])),
-        geo::Geometry::MultiPolygon(mp) => Some(mp),
+fn as_multipolygon(g: Geometry) -> Option<MultiPolygon<f64>> {
+    match g {
+        Geometry::Polygon(p) => Some(MultiPolygon(vec![p])),
+        Geometry::MultiPolygon(mp) => Some(mp),
         _ => None,
     }
 }

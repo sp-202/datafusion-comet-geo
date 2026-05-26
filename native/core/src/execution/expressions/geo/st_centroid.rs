@@ -18,15 +18,14 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, StringArray};
+use arrow::array::{ArrayRef, BinaryArray, BinaryBuilder};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
-use datafusion::logical_expr::{
-    ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility,
-};
+use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
 use geo::Centroid;
-use wkt::ToWkt;
-use wkt::TryFromWkt;
+use geo_types::Geometry;
+
+use super::wkb_util::{geom_to_wkb, read_wkb, wkb_to_geo};
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub struct StCentroid {
@@ -36,42 +35,37 @@ pub struct StCentroid {
 impl Default for StCentroid {
     fn default() -> Self {
         Self {
-            signature: Signature::exact(vec![DataType::Utf8], Volatility::Immutable),
+            signature: Signature::exact(vec![DataType::Binary], Volatility::Immutable),
         }
     }
 }
 
 impl ScalarUDFImpl for StCentroid {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn name(&self) -> &str {
-        "st_centroid"
-    }
-
-    fn signature(&self) -> &Signature {
-        &self.signature
-    }
-
-    fn return_type(&self, _arg_types: &[DataType]) -> DataFusionResult<DataType> {
-        Ok(DataType::Utf8)
-    }
+    fn as_any(&self) -> &dyn Any { self }
+    fn name(&self) -> &str { "st_centroid" }
+    fn signature(&self) -> &Signature { &self.signature }
+    fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> { Ok(DataType::Binary) }
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
-        let args = ColumnarValue::values_to_arrays(&args.args)?;
-        let geom_col = args[0].as_any().downcast_ref::<StringArray>().unwrap();
+        let arrays = ColumnarValue::values_to_arrays(&args.args)?;
+        let col = arrays[0].as_any().downcast_ref::<BinaryArray>().unwrap();
 
-        let result: StringArray = geom_col
-            .iter()
-            .map(|g| {
-                let wkt_str = g?;
-                let geom = geo::Geometry::<f64>::try_from_wkt_str(wkt_str).ok()?;
-                let centroid: geo::Point<f64> = geom.centroid()?;
-                Some(centroid.to_wkt().to_string())
-            })
-            .collect();
+        let mut builder = BinaryBuilder::with_capacity(col.len(), col.len() * 21);
+        for b in col.iter() {
+            match b {
+                Some(bytes) => {
+                    match wkb_to_geo(read_wkb(bytes).ok()?).ok()
+                        .and_then(|g| g.centroid())
+                        .and_then(|c| geom_to_wkb(&Geometry::Point(c)).ok())
+                    {
+                        Some(wkb) => builder.append_value(&wkb),
+                        None => builder.append_null(),
+                    }
+                }
+                None => builder.append_null(),
+            }
+        }
 
-        Ok(ColumnarValue::Array(Arc::new(result) as ArrayRef))
+        Ok(ColumnarValue::Array(Arc::new(builder.finish()) as ArrayRef))
     }
 }

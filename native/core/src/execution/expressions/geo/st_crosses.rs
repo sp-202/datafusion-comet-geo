@@ -18,14 +18,13 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, BooleanArray, StringArray};
+use arrow::array::{ArrayRef, BinaryArray, BooleanArray};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
-use datafusion::logical_expr::{
-    ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility,
-};
+use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
 use geo::relate::Relate;
-use wkt::TryFromWkt;
+
+use super::wkb_util::{read_wkb, wkb_to_geo};
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub struct StCrosses {
@@ -35,46 +34,27 @@ pub struct StCrosses {
 impl Default for StCrosses {
     fn default() -> Self {
         Self {
-            signature: Signature::exact(
-                vec![DataType::Utf8, DataType::Utf8],
-                Volatility::Immutable,
-            ),
+            signature: Signature::exact(vec![DataType::Binary, DataType::Binary], Volatility::Immutable),
         }
     }
 }
 
 impl ScalarUDFImpl for StCrosses {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn name(&self) -> &str {
-        "st_crosses"
-    }
-
-    fn signature(&self) -> &Signature {
-        &self.signature
-    }
-
-    fn return_type(&self, _arg_types: &[DataType]) -> DataFusionResult<DataType> {
-        Ok(DataType::Boolean)
-    }
+    fn as_any(&self) -> &dyn Any { self }
+    fn name(&self) -> &str { "st_crosses" }
+    fn signature(&self) -> &Signature { &self.signature }
+    fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> { Ok(DataType::Boolean) }
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
         let arrays = ColumnarValue::values_to_arrays(&args.args)?;
-        let g1s = arrays[0].as_any().downcast_ref::<StringArray>().unwrap();
-        let g2s = arrays[1].as_any().downcast_ref::<StringArray>().unwrap();
+        let col1 = arrays[0].as_any().downcast_ref::<BinaryArray>().unwrap();
+        let col2 = arrays[1].as_any().downcast_ref::<BinaryArray>().unwrap();
 
-        let result: BooleanArray = g1s
-            .iter()
-            .zip(g2s.iter())
-            .map(|(w1, w2)| match (w1, w2) {
-                (Some(w1), Some(w2)) => {
-                    let a = geo::Geometry::<f64>::try_from_wkt_str(w1).ok()?;
-                    let b = geo::Geometry::<f64>::try_from_wkt_str(w2).ok()?;
-                    Some(a.relate(&b).is_crosses())
-                }
-                _ => None,
+        let result: BooleanArray = col1.iter().zip(col2.iter())
+            .map(|(b1, b2)| {
+                let g1 = wkb_to_geo(read_wkb(b1?).ok()?).ok()?;
+                let g2 = wkb_to_geo(read_wkb(b2?).ok()?).ok()?;
+                Some(g1.relate(&g2).is_crosses())
             })
             .collect();
 

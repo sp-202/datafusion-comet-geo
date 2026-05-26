@@ -18,13 +18,13 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, StringArray};
+use arrow::array::{ArrayRef, BinaryArray, BinaryBuilder};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
-use datafusion::logical_expr::{
-    ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility,
-};
-use wkt::TryFromWkt;
+use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
+use geo_types::{Geometry, LineString};
+
+use super::wkb_util::{geom_to_wkb, read_wkb, wkb_to_geo};
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub struct StMakeLine {
@@ -34,54 +34,51 @@ pub struct StMakeLine {
 impl Default for StMakeLine {
     fn default() -> Self {
         Self {
-            signature: Signature::exact(
-                vec![DataType::Utf8, DataType::Utf8],
-                Volatility::Immutable,
-            ),
+            signature: Signature::exact(vec![DataType::Binary, DataType::Binary], Volatility::Immutable),
         }
     }
 }
 
 impl ScalarUDFImpl for StMakeLine {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn name(&self) -> &str {
-        "st_makeline"
-    }
-
-    fn signature(&self) -> &Signature {
-        &self.signature
-    }
-
-    fn return_type(&self, _arg_types: &[DataType]) -> DataFusionResult<DataType> {
-        Ok(DataType::Utf8)
-    }
+    fn as_any(&self) -> &dyn Any { self }
+    fn name(&self) -> &str { "st_makeline" }
+    fn signature(&self) -> &Signature { &self.signature }
+    fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> { Ok(DataType::Binary) }
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
         let arrays = ColumnarValue::values_to_arrays(&args.args)?;
-        let p1s = arrays[0].as_any().downcast_ref::<StringArray>().unwrap();
-        let p2s = arrays[1].as_any().downcast_ref::<StringArray>().unwrap();
+        let col1 = arrays[0].as_any().downcast_ref::<BinaryArray>().unwrap();
+        let col2 = arrays[1].as_any().downcast_ref::<BinaryArray>().unwrap();
 
-        let result: StringArray = p1s
-            .iter()
-            .zip(p2s.iter())
-            .map(|(w1, w2)| {
-                let g1 = geo::Geometry::<f64>::try_from_wkt_str(w1?).ok()?;
-                let g2 = geo::Geometry::<f64>::try_from_wkt_str(w2?).ok()?;
-                let c1 = match g1 {
-                    geo::Geometry::Point(p) => p.0,
-                    _ => return None,
-                };
-                let c2 = match g2 {
-                    geo::Geometry::Point(p) => p.0,
-                    _ => return None,
-                };
-                Some(format!("LINESTRING({} {},{} {})", c1.x, c1.y, c2.x, c2.y))
-            })
-            .collect();
+        let mut builder = BinaryBuilder::with_capacity(col1.len(), col1.len() * 42);
+        for (b1, b2) in col1.iter().zip(col2.iter()) {
+            match (b1, b2) {
+                (Some(bytes1), Some(bytes2)) => {
+                    let result = (|| -> Option<Vec<u8>> {
+                        let g1 = wkb_to_geo(read_wkb(bytes1).ok()?).ok()?;
+                        let g2 = wkb_to_geo(read_wkb(bytes2).ok()?).ok()?;
+                        let coords = collect_coords(&g1)
+                            .into_iter()
+                            .chain(collect_coords(&g2))
+                            .collect::<Vec<_>>();
+                        if coords.len() < 2 { return None; }
+                        let ls = LineString(coords);
+                        geom_to_wkb(&Geometry::LineString(ls)).ok()
+                    })();
+                    match result {
+                        Some(wkb) => builder.append_value(&wkb),
+                        None => builder.append_null(),
+                    }
+                }
+                _ => builder.append_null(),
+            }
+        }
 
-        Ok(ColumnarValue::Array(Arc::new(result) as ArrayRef))
+        Ok(ColumnarValue::Array(Arc::new(builder.finish()) as ArrayRef))
     }
+}
+
+fn collect_coords(g: &Geometry) -> Vec<geo_types::Coord<f64>> {
+    use geo::CoordsIter;
+    g.coords_iter().collect()
 }

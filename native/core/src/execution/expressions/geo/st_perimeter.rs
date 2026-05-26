@@ -18,14 +18,14 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, Float64Array, StringArray};
+use arrow::array::{ArrayRef, BinaryArray, Float64Array};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
-use datafusion::logical_expr::{
-    ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility,
-};
+use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
 use geo::EuclideanLength;
-use wkt::TryFromWkt;
+use geo_types::Geometry;
+
+use super::wkb_util::{read_wkb, wkb_to_geo};
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub struct StPerimeter {
@@ -35,61 +35,39 @@ pub struct StPerimeter {
 impl Default for StPerimeter {
     fn default() -> Self {
         Self {
-            signature: Signature::exact(vec![DataType::Utf8], Volatility::Immutable),
+            signature: Signature::exact(vec![DataType::Binary], Volatility::Immutable),
         }
     }
 }
 
 impl ScalarUDFImpl for StPerimeter {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn name(&self) -> &str {
-        "st_perimeter"
-    }
-
-    fn signature(&self) -> &Signature {
-        &self.signature
-    }
-
-    fn return_type(&self, _arg_types: &[DataType]) -> DataFusionResult<DataType> {
-        Ok(DataType::Float64)
-    }
+    fn as_any(&self) -> &dyn Any { self }
+    fn name(&self) -> &str { "st_perimeter" }
+    fn signature(&self) -> &Signature { &self.signature }
+    fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> { Ok(DataType::Float64) }
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
         let arrays = ColumnarValue::values_to_arrays(&args.args)?;
-        let col = arrays[0].as_any().downcast_ref::<StringArray>().unwrap();
+        let col = arrays[0].as_any().downcast_ref::<BinaryArray>().unwrap();
 
-        let result: Float64Array = col
-            .iter()
-            .map(|v| {
-                let wkt_str = v?;
-                let geom = geo::Geometry::<f64>::try_from_wkt_str(wkt_str).ok()?;
-                let len = match geom {
-                    geo::Geometry::Polygon(p) => {
-                        p.exterior().euclidean_length()
-                            + p.interiors()
-                                .iter()
-                                .map(|r| r.euclidean_length())
-                                .sum::<f64>()
-                    }
-                    geo::Geometry::MultiPolygon(mp) => mp
-                        .iter()
-                        .map(|p| {
-                            p.exterior().euclidean_length()
-                                + p.interiors()
-                                    .iter()
-                                    .map(|r| r.euclidean_length())
-                                    .sum::<f64>()
-                        })
-                        .sum(),
-                    _ => 0.0,
-                };
-                Some(len)
+        let result: Float64Array = col.iter()
+            .map(|b| {
+                let g = wkb_to_geo(read_wkb(b?).ok()?).ok()?;
+                Some(perimeter(&g))
             })
             .collect();
 
         Ok(ColumnarValue::Array(Arc::new(result) as ArrayRef))
+    }
+}
+
+fn perimeter(geom: &Geometry) -> f64 {
+    match geom {
+        Geometry::Polygon(p) => {
+            p.exterior().euclidean_length()
+                + p.interiors().iter().map(|r| r.euclidean_length()).sum::<f64>()
+        }
+        Geometry::MultiPolygon(mp) => mp.0.iter().map(|p| perimeter(&Geometry::Polygon(p.clone()))).sum(),
+        _ => 0.0,
     }
 }

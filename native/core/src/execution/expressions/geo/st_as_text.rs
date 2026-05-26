@@ -18,13 +18,12 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, StringArray};
+use arrow::array::{ArrayRef, BinaryArray, StringBuilder};
 use arrow::datatypes::DataType;
-use datafusion::common::Result as DataFusionResult;
-use datafusion::logical_expr::{
-    ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility,
-};
-use wkt::{ToWkt, TryFromWkt};
+use datafusion::common::{DataFusionError, Result as DataFusionResult};
+use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
+
+use super::wkb_util::read_wkb;
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub struct StAsText {
@@ -34,41 +33,34 @@ pub struct StAsText {
 impl Default for StAsText {
     fn default() -> Self {
         Self {
-            signature: Signature::exact(vec![DataType::Utf8], Volatility::Immutable),
+            signature: Signature::exact(vec![DataType::Binary], Volatility::Immutable),
         }
     }
 }
 
 impl ScalarUDFImpl for StAsText {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn name(&self) -> &str {
-        "st_astext"
-    }
-
-    fn signature(&self) -> &Signature {
-        &self.signature
-    }
-
-    fn return_type(&self, _arg_types: &[DataType]) -> DataFusionResult<DataType> {
-        Ok(DataType::Utf8)
-    }
+    fn as_any(&self) -> &dyn Any { self }
+    fn name(&self) -> &str { "st_astext" }
+    fn signature(&self) -> &Signature { &self.signature }
+    fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> { Ok(DataType::Utf8) }
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
         let arrays = ColumnarValue::values_to_arrays(&args.args)?;
-        let col = arrays[0].as_any().downcast_ref::<StringArray>().unwrap();
+        let col = arrays[0].as_any().downcast_ref::<BinaryArray>().unwrap();
 
-        let result: StringArray = col
-            .iter()
-            .map(|v| {
-                let wkt_str = v?;
-                let geom = geo::Geometry::<f64>::try_from_wkt_str(wkt_str).ok()?;
-                Some(geom.wkt_string())
-            })
-            .collect();
+        let mut builder = StringBuilder::with_capacity(col.len(), col.len() * 25);
+        for b in col.iter() {
+            match b {
+                Some(bytes) => {
+                    let wkb = read_wkb(bytes)?;
+                    wkt::to_wkt::write_geometry(&mut builder, &wkb)
+                        .map_err(|e| DataFusionError::External(Box::new(e)))?;
+                    builder.append_value("");
+                }
+                None => builder.append_null(),
+            }
+        }
 
-        Ok(ColumnarValue::Array(Arc::new(result) as ArrayRef))
+        Ok(ColumnarValue::Array(Arc::new(builder.finish()) as ArrayRef))
     }
 }

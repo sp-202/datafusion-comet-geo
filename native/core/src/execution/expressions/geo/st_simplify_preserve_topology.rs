@@ -18,28 +18,13 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, StringArray};
+use arrow::array::{ArrayRef, BinaryArray, BinaryBuilder, Float64Array};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
-use datafusion::logical_expr::{
-    ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility,
-};
-use datafusion::scalar::ScalarValue;
+use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
 use geo::SimplifyVwPreserve;
-use wkt::{ToWkt, TryFromWkt};
 
-fn scalar_to_f64(val: &ColumnarValue) -> f64 {
-    match val {
-        ColumnarValue::Scalar(ScalarValue::Float64(Some(v))) => *v,
-        ColumnarValue::Scalar(ScalarValue::Float32(Some(v))) => *v as f64,
-        ColumnarValue::Scalar(ScalarValue::Int64(Some(v))) => *v as f64,
-        ColumnarValue::Scalar(ScalarValue::Int32(Some(v))) => *v as f64,
-        ColumnarValue::Scalar(ScalarValue::Decimal128(Some(v), _p, s)) => {
-            (*v as f64) / 10f64.powi(*s as i32)
-        }
-        _ => 0.0,
-    }
-}
+use super::wkb_util::{geom_to_wkb, read_wkb, wkb_to_geo};
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub struct StSimplifyPreserveTopology {
@@ -49,63 +34,37 @@ pub struct StSimplifyPreserveTopology {
 impl Default for StSimplifyPreserveTopology {
     fn default() -> Self {
         Self {
-            signature: Signature::exact(
-                vec![DataType::Utf8, DataType::Float64],
-                Volatility::Immutable,
-            ),
+            signature: Signature::exact(vec![DataType::Binary, DataType::Float64], Volatility::Immutable),
         }
     }
 }
 
 impl ScalarUDFImpl for StSimplifyPreserveTopology {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn name(&self) -> &str {
-        "st_simplifypreservetopology"
-    }
-
-    fn signature(&self) -> &Signature {
-        &self.signature
-    }
-
-    fn return_type(&self, _arg_types: &[DataType]) -> DataFusionResult<DataType> {
-        Ok(DataType::Utf8)
-    }
+    fn as_any(&self) -> &dyn Any { self }
+    fn name(&self) -> &str { "st_simplifypreservetopology" }
+    fn signature(&self) -> &Signature { &self.signature }
+    fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> { Ok(DataType::Binary) }
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
-        let tolerance = scalar_to_f64(&args.args[1]);
-        let geom_arrays = ColumnarValue::values_to_arrays(std::slice::from_ref(&args.args[0]))?;
-        let col = geom_arrays[0]
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .unwrap();
+        let arrays = ColumnarValue::values_to_arrays(&args.args)?;
+        let geom_col = arrays[0].as_any().downcast_ref::<BinaryArray>().unwrap();
+        let tol_col = arrays[1].as_any().downcast_ref::<Float64Array>().unwrap();
 
-        let result: StringArray = col
-            .iter()
-            .map(|v| {
-                let wkt_str = v?;
-                let geom = geo::Geometry::<f64>::try_from_wkt_str(wkt_str).ok()?;
-                let simplified = match geom {
-                    geo::Geometry::LineString(ls) => {
-                        geo::Geometry::LineString(ls.simplify_vw_preserve(&tolerance))
+        let mut builder = BinaryBuilder::with_capacity(geom_col.len(), geom_col.len() * 64);
+        for (b, t) in geom_col.iter().zip(tol_col.iter()) {
+            match (b, t) {
+                (Some(bytes), Some(tol)) => {
+                    match wkb_to_geo(read_wkb(bytes).ok()?).ok()
+                        .and_then(|g| geom_to_wkb(&g.simplify_vw_preserve(tol)).ok())
+                    {
+                        Some(wkb) => builder.append_value(&wkb),
+                        None => builder.append_null(),
                     }
-                    geo::Geometry::MultiLineString(ml) => {
-                        geo::Geometry::MultiLineString(ml.simplify_vw_preserve(&tolerance))
-                    }
-                    geo::Geometry::Polygon(p) => {
-                        geo::Geometry::Polygon(p.simplify_vw_preserve(&tolerance))
-                    }
-                    geo::Geometry::MultiPolygon(mp) => {
-                        geo::Geometry::MultiPolygon(mp.simplify_vw_preserve(&tolerance))
-                    }
-                    other => other,
-                };
-                Some(simplified.wkt_string())
-            })
-            .collect();
+                }
+                _ => builder.append_null(),
+            }
+        }
 
-        Ok(ColumnarValue::Array(Arc::new(result) as ArrayRef))
+        Ok(ColumnarValue::Array(Arc::new(builder.finish()) as ArrayRef))
     }
 }

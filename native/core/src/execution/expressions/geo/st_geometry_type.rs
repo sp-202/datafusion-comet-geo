@@ -18,13 +18,10 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, StringArray};
+use arrow::array::{ArrayRef, BinaryArray, StringBuilder};
 use arrow::datatypes::DataType;
-use datafusion::common::Result as DataFusionResult;
-use datafusion::logical_expr::{
-    ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility,
-};
-use wkt::TryFromWkt;
+use datafusion::common::{DataFusionError, Result as DataFusionResult};
+use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub struct StGeometryType {
@@ -34,53 +31,53 @@ pub struct StGeometryType {
 impl Default for StGeometryType {
     fn default() -> Self {
         Self {
-            signature: Signature::exact(vec![DataType::Utf8], Volatility::Immutable),
+            signature: Signature::exact(vec![DataType::Binary], Volatility::Immutable),
         }
     }
 }
 
 impl ScalarUDFImpl for StGeometryType {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn name(&self) -> &str {
-        "st_geometrytype"
-    }
-
-    fn signature(&self) -> &Signature {
-        &self.signature
-    }
-
-    fn return_type(&self, _arg_types: &[DataType]) -> DataFusionResult<DataType> {
-        Ok(DataType::Utf8)
-    }
+    fn as_any(&self) -> &dyn Any { self }
+    fn name(&self) -> &str { "st_geometrytype" }
+    fn signature(&self) -> &Signature { &self.signature }
+    fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> { Ok(DataType::Utf8) }
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
-        let args = ColumnarValue::values_to_arrays(&args.args)?;
-        let geom_col = args[0].as_any().downcast_ref::<StringArray>().unwrap();
+        let arrays = ColumnarValue::values_to_arrays(&args.args)?;
+        let col = arrays[0].as_any().downcast_ref::<BinaryArray>().unwrap();
 
-        let result: StringArray = geom_col
-            .iter()
-            .map(|g| {
-                let wkt = g?;
-                let geom = geo::Geometry::<f64>::try_from_wkt_str(wkt).ok()?;
-                let type_name = match geom {
-                    geo::Geometry::Point(_) => "ST_Point",
-                    geo::Geometry::Line(_) => "ST_LineString",
-                    geo::Geometry::LineString(_) => "ST_LineString",
-                    geo::Geometry::Polygon(_) => "ST_Polygon",
-                    geo::Geometry::MultiPoint(_) => "ST_MultiPoint",
-                    geo::Geometry::MultiLineString(_) => "ST_MultiLineString",
-                    geo::Geometry::MultiPolygon(_) => "ST_MultiPolygon",
-                    geo::Geometry::GeometryCollection(_) => "ST_GeometryCollection",
-                    geo::Geometry::Rect(_) => "ST_Polygon",
-                    geo::Geometry::Triangle(_) => "ST_Polygon",
-                };
-                Some(type_name.to_string())
-            })
-            .collect();
+        let mut builder = StringBuilder::with_capacity(col.len(), col.len() * 12);
+        for b in col.iter() {
+            match b {
+                Some(bytes) => {
+                    let name = infer_type_name(bytes)?;
+                    builder.append_value(name);
+                }
+                None => builder.append_null(),
+            }
+        }
 
-        Ok(ColumnarValue::Array(Arc::new(result) as ArrayRef))
+        Ok(ColumnarValue::Array(Arc::new(builder.finish()) as ArrayRef))
+    }
+}
+
+fn infer_type_name(buf: &[u8]) -> DataFusionResult<&'static str> {
+    if buf.len() < 5 {
+        return Err(DataFusionError::Execution(format!("Invalid WKB: {} bytes", buf.len())));
+    }
+    let code = match buf[0] {
+        0 => u32::from_be_bytes([buf[1], buf[2], buf[3], buf[4]]),
+        1 => u32::from_le_bytes([buf[1], buf[2], buf[3], buf[4]]),
+        _ => return Err(DataFusionError::Execution("Invalid WKB byte order".into())),
+    };
+    match code & 0xFFFF {
+        1 | 1001 | 2001 | 3001 => Ok("ST_Point"),
+        2 | 1002 | 2002 | 3002 => Ok("ST_LineString"),
+        3 | 1003 | 2003 | 3003 => Ok("ST_Polygon"),
+        4 | 1004 | 2004 | 3004 => Ok("ST_MultiPoint"),
+        5 | 1005 | 2005 | 3005 => Ok("ST_MultiLineString"),
+        6 | 1006 | 2006 | 3006 => Ok("ST_MultiPolygon"),
+        7 | 1007 | 2007 | 3007 => Ok("ST_GeometryCollection"),
+        other => Err(DataFusionError::Execution(format!("Unknown WKB type: {other}"))),
     }
 }

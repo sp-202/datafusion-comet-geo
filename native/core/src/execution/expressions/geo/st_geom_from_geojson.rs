@@ -18,13 +18,12 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, StringArray};
+use arrow::array::{ArrayRef, BinaryBuilder, StringArray};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
-use datafusion::logical_expr::{
-    ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility,
-};
-use wkt::ToWkt;
+use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
+
+use super::wkb_util::geom_to_wkb;
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub struct StGeomFromGeoJson {
@@ -40,36 +39,32 @@ impl Default for StGeomFromGeoJson {
 }
 
 impl ScalarUDFImpl for StGeomFromGeoJson {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn name(&self) -> &str {
-        "st_geomfromgeojson"
-    }
-
-    fn signature(&self) -> &Signature {
-        &self.signature
-    }
-
-    fn return_type(&self, _arg_types: &[DataType]) -> DataFusionResult<DataType> {
-        Ok(DataType::Utf8)
-    }
+    fn as_any(&self) -> &dyn Any { self }
+    fn name(&self) -> &str { "st_geomfromgeojson" }
+    fn signature(&self) -> &Signature { &self.signature }
+    fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> { Ok(DataType::Binary) }
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
         let arrays = ColumnarValue::values_to_arrays(&args.args)?;
         let col = arrays[0].as_any().downcast_ref::<StringArray>().unwrap();
 
-        let result: StringArray = col
-            .iter()
-            .map(|v| {
-                let json_str = v?;
-                let gj: geojson::Geometry = json_str.parse().ok()?;
-                let geom: geo::Geometry<f64> = geo::Geometry::try_from(&gj).ok()?;
-                Some(geom.wkt_string())
-            })
-            .collect();
+        let mut builder = BinaryBuilder::with_capacity(col.len(), col.len() * 64);
+        for v in col.iter() {
+            match v {
+                Some(json_str) => {
+                    match json_str.parse::<geojson::Geometry>()
+                        .ok()
+                        .and_then(|gj| geo::Geometry::<f64>::try_from(&gj).ok())
+                        .and_then(|geom| geom_to_wkb(&geom).ok())
+                    {
+                        Some(bytes) => builder.append_value(&bytes),
+                        None => builder.append_null(),
+                    }
+                }
+                None => builder.append_null(),
+            }
+        }
 
-        Ok(ColumnarValue::Array(Arc::new(result) as ArrayRef))
+        Ok(ColumnarValue::Array(Arc::new(builder.finish()) as ArrayRef))
     }
 }

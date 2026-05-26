@@ -18,14 +18,13 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, StringArray};
+use arrow::array::{ArrayRef, BinaryArray, StringBuilder};
 use arrow::datatypes::DataType;
-use datafusion::common::Result as DataFusionResult;
-use datafusion::logical_expr::{
-    ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility,
-};
-use geojson::Geometry as GeoJsonGeometry;
-use wkt::TryFromWkt;
+use datafusion::common::{DataFusionError, Result as DataFusionResult};
+use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
+use geo_traits::{GeometryTrait, GeometryType, PointTrait, PolygonTrait};
+
+use super::wkb_util::{read_wkb, wkb_to_geo};
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub struct StAsGeoJson {
@@ -35,42 +34,50 @@ pub struct StAsGeoJson {
 impl Default for StAsGeoJson {
     fn default() -> Self {
         Self {
-            signature: Signature::exact(vec![DataType::Utf8], Volatility::Immutable),
+            signature: Signature::exact(vec![DataType::Binary], Volatility::Immutable),
         }
     }
 }
 
 impl ScalarUDFImpl for StAsGeoJson {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn name(&self) -> &str {
-        "st_asgeojson"
-    }
-
-    fn signature(&self) -> &Signature {
-        &self.signature
-    }
-
-    fn return_type(&self, _arg_types: &[DataType]) -> DataFusionResult<DataType> {
-        Ok(DataType::Utf8)
-    }
+    fn as_any(&self) -> &dyn Any { self }
+    fn name(&self) -> &str { "st_asgeojson" }
+    fn signature(&self) -> &Signature { &self.signature }
+    fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> { Ok(DataType::Utf8) }
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
         let arrays = ColumnarValue::values_to_arrays(&args.args)?;
-        let col = arrays[0].as_any().downcast_ref::<StringArray>().unwrap();
+        let col = arrays[0].as_any().downcast_ref::<BinaryArray>().unwrap();
 
-        let result: StringArray = col
-            .iter()
-            .map(|v| {
-                let wkt_str = v?;
-                let geom = geo::Geometry::<f64>::try_from_wkt_str(wkt_str).ok()?;
-                let gj: GeoJsonGeometry = GeoJsonGeometry::from(&geom);
-                Some(gj.to_string())
-            })
-            .collect();
+        let mut builder = StringBuilder::with_capacity(col.len(), col.len() * 33);
+        for b in col.iter() {
+            match b {
+                Some(bytes) => {
+                    let wkb = read_wkb(bytes)?;
+                    let json_str = geom_to_geojson(&wkb)?;
+                    builder.append_value(&json_str);
+                }
+                None => builder.append_null(),
+            }
+        }
 
-        Ok(ColumnarValue::Array(Arc::new(result) as ArrayRef))
+        Ok(ColumnarValue::Array(Arc::new(builder.finish()) as ArrayRef))
     }
+}
+
+fn geom_to_geojson(wkb: &wkb::reader::Wkb<'_>) -> DataFusionResult<String> {
+    match wkb.as_type() {
+        GeometryType::Point(pt) if pt.coord().is_none() => {
+            return Ok(r#"{"type":"Point","coordinates":[]}"#.to_string());
+        }
+        GeometryType::Polygon(poly) if poly.exterior().is_none() => {
+            return Ok(r#"{"type":"Polygon","coordinates":[]}"#.to_string());
+        }
+        _ => {}
+    }
+
+    let geo_geom = wkb_to_geo(wkb.clone())?;
+    let geojson_value = geojson::GeometryValue::from(&geo_geom);
+    let geojson_geom = geojson::Geometry::new(geojson_value);
+    serde_json::to_string(&geojson_geom).map_err(|e| DataFusionError::External(Box::new(e)))
 }

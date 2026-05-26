@@ -18,12 +18,13 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::array::{Array, ArrayRef, Decimal128Array, Float64Array, StringArray};
+use arrow::array::{Array, ArrayRef, BinaryBuilder, Decimal128Array, Float64Array};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
-use datafusion::logical_expr::{
-    ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility,
-};
+use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
+use geo_types::{coord, Geometry, Polygon, LineString};
+
+use super::wkb_util::geom_to_wkb;
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub struct StMakeEnvelope {
@@ -39,21 +40,10 @@ impl Default for StMakeEnvelope {
 }
 
 impl ScalarUDFImpl for StMakeEnvelope {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn name(&self) -> &str {
-        "st_makeenvelope"
-    }
-
-    fn signature(&self) -> &Signature {
-        &self.signature
-    }
-
-    fn return_type(&self, _arg_types: &[DataType]) -> DataFusionResult<DataType> {
-        Ok(DataType::Utf8)
-    }
+    fn as_any(&self) -> &dyn Any { self }
+    fn name(&self) -> &str { "st_makeenvelope" }
+    fn signature(&self) -> &Signature { &self.signature }
+    fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> { Ok(DataType::Binary) }
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
         let arrays = ColumnarValue::values_to_arrays(&args.args)?;
@@ -62,16 +52,28 @@ impl ScalarUDFImpl for StMakeEnvelope {
         let xmaxs = extract_f64_col(&arrays[2]);
         let ymaxs = extract_f64_col(&arrays[3]);
 
-        let result: StringArray = (0..xmins.len())
-            .map(|i| {
-                let (xmin, ymin, xmax, ymax) = (xmins[i]?, ymins[i]?, xmaxs[i]?, ymaxs[i]?);
-                Some(format!(
-                    "POLYGON(({xmin} {ymin},{xmax} {ymin},{xmax} {ymax},{xmin} {ymax},{xmin} {ymin}))"
-                ))
-            })
-            .collect();
+        let mut builder = BinaryBuilder::with_capacity(xmins.len(), xmins.len() * 100);
+        for i in 0..xmins.len() {
+            match (xmins[i], ymins[i], xmaxs[i], ymaxs[i]) {
+                (Some(xmin), Some(ymin), Some(xmax), Some(ymax)) => {
+                    let exterior = LineString(vec![
+                        coord! { x: xmin, y: ymin },
+                        coord! { x: xmax, y: ymin },
+                        coord! { x: xmax, y: ymax },
+                        coord! { x: xmin, y: ymax },
+                        coord! { x: xmin, y: ymin },
+                    ]);
+                    let poly = Polygon::new(exterior, vec![]);
+                    match geom_to_wkb(&Geometry::Polygon(poly)).ok() {
+                        Some(wkb) => builder.append_value(&wkb),
+                        None => builder.append_null(),
+                    }
+                }
+                _ => builder.append_null(),
+            }
+        }
 
-        Ok(ColumnarValue::Array(Arc::new(result) as ArrayRef))
+        Ok(ColumnarValue::Array(Arc::new(builder.finish()) as ArrayRef))
     }
 }
 
@@ -84,10 +86,7 @@ fn extract_f64_col(arr: &dyn Array) -> Vec<Option<f64>> {
             DataType::Decimal128(_, s) => *s as i32,
             _ => 0,
         };
-        return a
-            .iter()
-            .map(|v| v.map(|n| (n as f64) / 10f64.powi(scale)))
-            .collect();
+        return a.iter().map(|v| v.map(|n| (n as f64) / 10f64.powi(scale))).collect();
     }
     vec![None; arr.len()]
 }

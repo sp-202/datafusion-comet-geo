@@ -16,18 +16,16 @@
 // under the License.
 
 use std::any::Any;
-use std::f64::consts::PI;
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, StringArray};
+use arrow::array::{ArrayRef, BinaryArray, BinaryBuilder, Float64Array};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
-use datafusion::logical_expr::{
-    ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility,
-};
-use datafusion::scalar::ScalarValue;
-use geo::{Coord, LineString, Point, Polygon};
-use wkt::TryFromWkt;
+use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
+use geo::algorithm::buffer::{Buffer, BufferStyle};
+use geo_types::Geometry;
+
+use super::wkb_util::{geom_to_wkb, read_wkb, wkb_to_geo};
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub struct StBuffer {
@@ -37,119 +35,41 @@ pub struct StBuffer {
 impl Default for StBuffer {
     fn default() -> Self {
         Self {
-            signature: Signature::exact(
-                vec![DataType::Utf8, DataType::Float64],
-                Volatility::Immutable,
-            ),
+            signature: Signature::exact(vec![DataType::Binary, DataType::Float64], Volatility::Immutable),
         }
     }
 }
 
 impl ScalarUDFImpl for StBuffer {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn name(&self) -> &str {
-        "st_buffer"
-    }
-
-    fn signature(&self) -> &Signature {
-        &self.signature
-    }
-
-    fn return_type(&self, _arg_types: &[DataType]) -> DataFusionResult<DataType> {
-        Ok(DataType::Utf8)
-    }
+    fn as_any(&self) -> &dyn Any { self }
+    fn name(&self) -> &str { "st_buffer" }
+    fn signature(&self) -> &Signature { &self.signature }
+    fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> { Ok(DataType::Binary) }
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
-        // Extract distance — may be a scalar literal or a column.
-        let distance = scalar_to_f64(&args.args[1]);
-        let geom_arrays = ColumnarValue::values_to_arrays(std::slice::from_ref(&args.args[0]))?;
-        let geom_col = geom_arrays[0]
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .unwrap();
+        let arrays = ColumnarValue::values_to_arrays(&args.args)?;
+        let geom_col = arrays[0].as_any().downcast_ref::<BinaryArray>().unwrap();
+        let dist_col = arrays[1].as_any().downcast_ref::<Float64Array>().unwrap();
 
-        let result: StringArray = geom_col
-            .iter()
-            .map(|g| {
-                let wkt = g?;
-                let geom = geo::Geometry::<f64>::try_from_wkt_str(wkt).ok()?;
-                Some(geom_to_wkt(&buffer_geometry(&geom, distance, 32)))
-            })
-            .collect();
-
-        Ok(ColumnarValue::Array(Arc::new(result) as ArrayRef))
-    }
-}
-
-fn scalar_to_f64(val: &ColumnarValue) -> f64 {
-    match val {
-        ColumnarValue::Scalar(ScalarValue::Float64(Some(v))) => *v,
-        ColumnarValue::Scalar(ScalarValue::Float32(Some(v))) => *v as f64,
-        ColumnarValue::Scalar(ScalarValue::Int64(Some(v))) => *v as f64,
-        ColumnarValue::Scalar(ScalarValue::Int32(Some(v))) => *v as f64,
-        ColumnarValue::Scalar(ScalarValue::Decimal128(Some(v), _p, s)) => {
-            (*v as f64) / 10f64.powi(*s as i32)
-        }
-        _ => 0.0,
-    }
-}
-
-fn point_circle(cx: f64, cy: f64, radius: f64, segments: usize) -> Polygon<f64> {
-    let coords: Vec<Coord<f64>> = (0..=segments)
-        .map(|i| {
-            let angle = 2.0 * PI * (i as f64) / (segments as f64);
-            Coord {
-                x: cx + radius * angle.cos(),
-                y: cy + radius * angle.sin(),
+        let mut builder = BinaryBuilder::with_capacity(geom_col.len(), geom_col.len() * 128);
+        for (b, d) in geom_col.iter().zip(dist_col.iter()) {
+            match (b, d) {
+                (Some(bytes), Some(dist)) => {
+                    match wkb_to_geo(read_wkb(bytes).ok()?).ok()
+                        .and_then(|g| {
+                            let style = BufferStyle::new(dist);
+                            let buffered = g.buffer_with_style(style);
+                            geom_to_wkb(&Geometry::MultiPolygon(buffered)).ok()
+                        })
+                    {
+                        Some(wkb) => builder.append_value(&wkb),
+                        None => builder.append_null(),
+                    }
+                }
+                _ => builder.append_null(),
             }
-        })
-        .collect();
-    Polygon::new(LineString::from(coords), vec![])
-}
+        }
 
-fn coords_to_wkt(coords: &[Coord<f64>]) -> String {
-    let pts: Vec<String> = coords.iter().map(|c| format!("{} {}", c.x, c.y)).collect();
-    format!("({})", pts.join(","))
-}
-
-fn geom_to_wkt(geom: &geo::Geometry<f64>) -> String {
-    match geom {
-        geo::Geometry::Polygon(p) => {
-            format!("POLYGON({})", coords_to_wkt(p.exterior().0.as_slice()))
-        }
-        geo::Geometry::MultiPolygon(mp) => {
-            let parts: Vec<String> = mp
-                .iter()
-                .map(|p| coords_to_wkt(p.exterior().0.as_slice()))
-                .collect();
-            format!("MULTIPOLYGON(({}))", parts.join("),("))
-        }
-        other => {
-            use wkt::ToWkt;
-            other.wkt_string()
-        }
-    }
-}
-
-fn buffer_geometry(
-    geom: &geo::Geometry<f64>,
-    distance: f64,
-    segments: usize,
-) -> geo::Geometry<f64> {
-    match geom {
-        geo::Geometry::Point(Point(c)) => {
-            geo::Geometry::Polygon(point_circle(c.x, c.y, distance, segments))
-        }
-        geo::Geometry::MultiPoint(mp) => {
-            let polys: Vec<Polygon<f64>> = mp
-                .iter()
-                .map(|Point(c)| point_circle(c.x, c.y, distance, segments))
-                .collect();
-            geo::Geometry::MultiPolygon(geo::MultiPolygon(polys))
-        }
-        other => other.clone(),
+        Ok(ColumnarValue::Array(Arc::new(builder.finish()) as ArrayRef))
     }
 }

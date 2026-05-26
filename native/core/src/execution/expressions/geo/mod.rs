@@ -15,6 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+pub mod wkb_util;
 mod st_area;
 mod st_as_geojson;
 mod st_as_text;

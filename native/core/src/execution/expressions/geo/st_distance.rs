@@ -18,15 +18,13 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, Float64Array, StringArray};
+use arrow::array::{ArrayRef, BinaryArray, Float64Array};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
-use datafusion::logical_expr::{
-    ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility,
-};
-use geo::relate::Relate;
+use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
 use geo::EuclideanDistance;
-use wkt::TryFromWkt;
+
+use super::wkb_util::{read_wkb, wkb_to_geo};
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub struct StDistance {
@@ -36,53 +34,27 @@ pub struct StDistance {
 impl Default for StDistance {
     fn default() -> Self {
         Self {
-            signature: Signature::exact(
-                vec![DataType::Utf8, DataType::Utf8],
-                Volatility::Immutable,
-            ),
+            signature: Signature::exact(vec![DataType::Binary, DataType::Binary], Volatility::Immutable),
         }
     }
 }
 
 impl ScalarUDFImpl for StDistance {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn name(&self) -> &str {
-        "st_distance"
-    }
-
-    fn signature(&self) -> &Signature {
-        &self.signature
-    }
-
-    fn return_type(&self, _arg_types: &[DataType]) -> DataFusionResult<DataType> {
-        Ok(DataType::Float64)
-    }
+    fn as_any(&self) -> &dyn Any { self }
+    fn name(&self) -> &str { "st_distance" }
+    fn signature(&self) -> &Signature { &self.signature }
+    fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> { Ok(DataType::Float64) }
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
-        let args = ColumnarValue::values_to_arrays(&args.args)?;
-        let geom1 = args[0].as_any().downcast_ref::<StringArray>().unwrap();
-        let geom2 = args[1].as_any().downcast_ref::<StringArray>().unwrap();
+        let arrays = ColumnarValue::values_to_arrays(&args.args)?;
+        let col1 = arrays[0].as_any().downcast_ref::<BinaryArray>().unwrap();
+        let col2 = arrays[1].as_any().downcast_ref::<BinaryArray>().unwrap();
 
-        let result: Float64Array = geom1
-            .iter()
-            .zip(geom2.iter())
-            .map(|(g1, g2)| match (g1, g2) {
-                (Some(g1), Some(g2)) => {
-                    let a = geo::Geometry::<f64>::try_from_wkt_str(g1).ok()?;
-                    let b = geo::Geometry::<f64>::try_from_wkt_str(g2).ok()?;
-                    // If geometries intersect, distance is 0.0 by definition.
-                    // Otherwise use EuclideanDistance which correctly measures
-                    // nearest-point distance between disjoint geometries.
-                    if a.relate(&b).is_intersects() {
-                        Some(0.0)
-                    } else {
-                        Some(a.euclidean_distance(&b))
-                    }
-                }
-                _ => None,
+        let result: Float64Array = col1.iter().zip(col2.iter())
+            .map(|(b1, b2)| {
+                let g1 = wkb_to_geo(read_wkb(b1?).ok()?).ok()?;
+                let g2 = wkb_to_geo(read_wkb(b2?).ok()?).ok()?;
+                Some(g1.euclidean_distance(&g2))
             })
             .collect();
 

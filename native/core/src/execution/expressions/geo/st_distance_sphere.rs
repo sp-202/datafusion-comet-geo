@@ -19,13 +19,13 @@ use std::any::Any;
 use std::f64::consts::PI;
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, Float64Array, StringArray};
+use arrow::array::{ArrayRef, BinaryArray, Float64Array};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
-use datafusion::logical_expr::{
-    ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility,
-};
-use wkt::TryFromWkt;
+use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
+use geo::Centroid;
+
+use super::wkb_util::{read_wkb, wkb_to_geo};
 
 const EARTH_RADIUS_METERS: f64 = 6_371_008.8;
 
@@ -37,56 +37,34 @@ pub struct StDistanceSphere {
 impl Default for StDistanceSphere {
     fn default() -> Self {
         Self {
-            signature: Signature::exact(
-                vec![DataType::Utf8, DataType::Utf8],
-                Volatility::Immutable,
-            ),
+            signature: Signature::exact(vec![DataType::Binary, DataType::Binary], Volatility::Immutable),
         }
     }
 }
 
 impl ScalarUDFImpl for StDistanceSphere {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn name(&self) -> &str {
-        "st_distancesphere"
-    }
-
-    fn signature(&self) -> &Signature {
-        &self.signature
-    }
-
-    fn return_type(&self, _arg_types: &[DataType]) -> DataFusionResult<DataType> {
-        Ok(DataType::Float64)
-    }
+    fn as_any(&self) -> &dyn Any { self }
+    fn name(&self) -> &str { "st_distancesphere" }
+    fn signature(&self) -> &Signature { &self.signature }
+    fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> { Ok(DataType::Float64) }
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
         let arrays = ColumnarValue::values_to_arrays(&args.args)?;
-        let g1s = arrays[0].as_any().downcast_ref::<StringArray>().unwrap();
-        let g2s = arrays[1].as_any().downcast_ref::<StringArray>().unwrap();
+        let col1 = arrays[0].as_any().downcast_ref::<BinaryArray>().unwrap();
+        let col2 = arrays[1].as_any().downcast_ref::<BinaryArray>().unwrap();
 
-        let result: Float64Array = g1s
-            .iter()
-            .zip(g2s.iter())
-            .map(|(w1, w2)| {
-                let a = geo::Geometry::<f64>::try_from_wkt_str(w1?).ok()?;
-                let b = geo::Geometry::<f64>::try_from_wkt_str(w2?).ok()?;
-                let (lon1, lat1) = centroid_coords(&a)?;
-                let (lon2, lat2) = centroid_coords(&b)?;
-                Some(haversine(lon1, lat1, lon2, lat2))
+        let result: Float64Array = col1.iter().zip(col2.iter())
+            .map(|(b1, b2)| {
+                let g1 = wkb_to_geo(read_wkb(b1?).ok()?).ok()?;
+                let g2 = wkb_to_geo(read_wkb(b2?).ok()?).ok()?;
+                let c1 = g1.centroid()?;
+                let c2 = g2.centroid()?;
+                Some(haversine(c1.x(), c1.y(), c2.x(), c2.y()))
             })
             .collect();
 
         Ok(ColumnarValue::Array(Arc::new(result) as ArrayRef))
     }
-}
-
-fn centroid_coords(geom: &geo::Geometry<f64>) -> Option<(f64, f64)> {
-    use geo::Centroid;
-    let c = geom.centroid()?;
-    Some((c.x(), c.y()))
 }
 
 fn haversine(lon1: f64, lat1: f64, lon2: f64, lat2: f64) -> f64 {

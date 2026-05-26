@@ -18,13 +18,13 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, StringArray};
+use arrow::array::{ArrayRef, BinaryArray, BinaryBuilder};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
-use datafusion::logical_expr::{
-    ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility,
-};
-use wkt::{ToWkt, TryFromWkt};
+use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
+use geo_types::{Geometry, LineString, MultiLineString, MultiPoint};
+
+use super::wkb_util::{geom_to_wkb, read_wkb, wkb_to_geo};
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub struct StBoundary {
@@ -34,63 +34,70 @@ pub struct StBoundary {
 impl Default for StBoundary {
     fn default() -> Self {
         Self {
-            signature: Signature::exact(vec![DataType::Utf8], Volatility::Immutable),
+            signature: Signature::exact(vec![DataType::Binary], Volatility::Immutable),
         }
     }
 }
 
 impl ScalarUDFImpl for StBoundary {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn name(&self) -> &str {
-        "st_boundary"
-    }
-
-    fn signature(&self) -> &Signature {
-        &self.signature
-    }
-
-    fn return_type(&self, _arg_types: &[DataType]) -> DataFusionResult<DataType> {
-        Ok(DataType::Utf8)
-    }
+    fn as_any(&self) -> &dyn Any { self }
+    fn name(&self) -> &str { "st_boundary" }
+    fn signature(&self) -> &Signature { &self.signature }
+    fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> { Ok(DataType::Binary) }
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
         let arrays = ColumnarValue::values_to_arrays(&args.args)?;
-        let col = arrays[0].as_any().downcast_ref::<StringArray>().unwrap();
+        let col = arrays[0].as_any().downcast_ref::<BinaryArray>().unwrap();
 
-        let result: StringArray = col
-            .iter()
-            .map(|v| {
-                let wkt_str = v?;
-                let geom = geo::Geometry::<f64>::try_from_wkt_str(wkt_str).ok()?;
-                // Boundary of a polygon = its exterior ring as a LineString
-                // Boundary of a LineString = its two endpoints as a MultiPoint
-                let boundary: geo::Geometry<f64> = match geom {
-                    geo::Geometry::Polygon(p) => geo::Geometry::LineString(p.exterior().clone()),
-                    geo::Geometry::MultiPolygon(mp) => {
-                        let rings: Vec<geo::LineString<f64>> =
-                            mp.iter().map(|p| p.exterior().clone()).collect();
-                        geo::Geometry::MultiLineString(geo::MultiLineString(rings))
+        let mut builder = BinaryBuilder::with_capacity(col.len(), col.len() * 64);
+        for b in col.iter() {
+            match b {
+                Some(bytes) => {
+                    match wkb_to_geo(read_wkb(bytes).ok()?).ok()
+                        .and_then(|g| boundary(&g))
+                        .and_then(|b| geom_to_wkb(&b).ok())
+                    {
+                        Some(wkb) => builder.append_value(&wkb),
+                        None => builder.append_null(),
                     }
-                    geo::Geometry::LineString(ls) => {
-                        let coords = ls.0.clone();
-                        if coords.len() < 2 {
-                            return Some("GEOMETRYCOLLECTION EMPTY".to_string());
-                        }
-                        let pts = vec![
-                            geo::Point::from(*coords.first()?),
-                            geo::Point::from(*coords.last()?),
-                        ];
-                        geo::Geometry::MultiPoint(geo::MultiPoint(pts))
-                    }
-                    _ => return Some("GEOMETRYCOLLECTION EMPTY".to_string()),
-                };
-                Some(boundary.wkt_string())
-            })
-            .collect();
+                }
+                None => builder.append_null(),
+            }
+        }
 
-        Ok(ColumnarValue::Array(Arc::new(result) as ArrayRef))
+        Ok(ColumnarValue::Array(Arc::new(builder.finish()) as ArrayRef))
+    }
+}
+
+fn boundary(geom: &Geometry) -> Option<Geometry> {
+    match geom {
+        Geometry::Point(_) => Some(Geometry::GeometryCollection(geo_types::GeometryCollection(vec![]))),
+        Geometry::LineString(ls) => {
+            let pts = vec![
+                geo_types::Point(ls.0.first()?.clone()),
+                geo_types::Point(ls.0.last()?.clone()),
+            ];
+            Some(Geometry::MultiPoint(MultiPoint(pts)))
+        }
+        Geometry::Polygon(p) => {
+            let mut rings: Vec<LineString<f64>> = vec![p.exterior().clone()];
+            rings.extend(p.interiors().iter().cloned());
+            Some(Geometry::MultiLineString(MultiLineString(rings)))
+        }
+        Geometry::MultiLineString(mls) => {
+            let pts: Vec<geo_types::Point<f64>> = mls.0.iter().flat_map(|ls| {
+                ls.0.first().map(|c| geo_types::Point(c.clone())).into_iter()
+                    .chain(ls.0.last().map(|c| geo_types::Point(c.clone())).into_iter())
+            }).collect();
+            Some(Geometry::MultiPoint(MultiPoint(pts)))
+        }
+        Geometry::MultiPolygon(mp) => {
+            let rings: Vec<LineString<f64>> = mp.0.iter().flat_map(|p| {
+                std::iter::once(p.exterior().clone())
+                    .chain(p.interiors().iter().cloned())
+            }).collect();
+            Some(Geometry::MultiLineString(MultiLineString(rings)))
+        }
+        _ => None,
     }
 }
