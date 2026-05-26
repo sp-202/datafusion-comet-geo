@@ -142,9 +142,7 @@ case class StPoint(left: Expression, right: Expression)
     with NullIntolerant {
   override def dataType: DataType = BinaryType
   override def nullSafeEval(x: Any, y: Any): Any =
-    CometGeoFallback.makePoint(
-      x.asInstanceOf[Double],
-      y.asInstanceOf[Double])
+    CometGeoFallback.makePoint(x.asInstanceOf[Double], y.asInstanceOf[Double])
   override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
     defineCodeGen(
       ctx,
@@ -613,9 +611,7 @@ case class StHausdorffDistance(left: Expression, right: Expression)
     with NullIntolerant {
   override def dataType: DataType = DoubleType
   override def nullSafeEval(g1: Any, g2: Any): Any =
-    CometGeoFallback.hausdorffDistance(
-      g1.asInstanceOf[Array[Byte]],
-      g2.asInstanceOf[Array[Byte]])
+    CometGeoFallback.hausdorffDistance(g1.asInstanceOf[Array[Byte]], g2.asInstanceOf[Array[Byte]])
   override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
     defineCodeGen(
       ctx,
@@ -673,8 +669,7 @@ case class StBoundary(child: Expression) extends UnaryExpression with NullIntole
     defineCodeGen(
       ctx,
       ev,
-      g =>
-        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$.boundary((byte[]) $g)")
+      g => s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$.boundary((byte[]) $g)")
   override protected def withNewChildInternal(newChild: Expression): Expression =
     copy(child = newChild)
 }
