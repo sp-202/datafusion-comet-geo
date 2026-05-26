@@ -22,7 +22,7 @@ use std::sync::Arc;
 use arrow::array::{ArrayRef, BinaryArray, Float64Array};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
-use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
+use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, TypeSignature, Volatility};
 use geo::Centroid;
 
 use super::wkb_util::{read_wkb, wkb_to_geo, as_binary_array};

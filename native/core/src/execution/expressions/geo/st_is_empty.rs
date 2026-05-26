@@ -21,7 +21,7 @@ use std::sync::Arc;
 use arrow::array::{ArrayRef, BinaryArray, BooleanArray};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
-use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
+use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, TypeSignature, Volatility};
 use geo_traits::{GeometryCollectionTrait, GeometryTrait, GeometryType, LineStringTrait, MultiLineStringTrait, MultiPointTrait, MultiPolygonTrait, PointTrait, PolygonTrait};
 
 use super::wkb_util::{read_wkb, as_binary_array};

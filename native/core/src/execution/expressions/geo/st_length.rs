@@ -21,7 +21,7 @@ use std::sync::Arc;
 use arrow::array::{Array, ArrayRef, BinaryArray, Float64Array};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
-use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
+use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, TypeSignature, Volatility};
 use geo::algorithm::line_measures::{Euclidean, Length};
 use geo_types::Geometry;
 
