@@ -18,9 +18,9 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::array::{Array, ArrayRef, BinaryArray, BinaryBuilder, Float64Array};
+use arrow::array::{Array, ArrayRef, BinaryBuilder};
 use arrow::datatypes::DataType;
-use datafusion::common::Result as DataFusionResult;
+use datafusion::common::{DataFusionError, Result as DataFusionResult};
 use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, TypeSignature, Volatility};
 use geo::algorithm::buffer::{Buffer, BufferStyle};
 use geo_types::Geometry;
@@ -53,17 +53,28 @@ impl ScalarUDFImpl for StBuffer {
     fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> { Ok(DataType::Binary) }
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
+        // SedonaDB pattern (sedona-db/rust/sedona-geo/src/st_buffer.rs):
+        // cast distance arg to Float64 scalar BEFORE looping — handles literal scalars
+        let dist_casted = args.args[1].cast_to(&DataType::Float64, None)?;
+        let params: Option<BufferStyle<f64>> = if let ColumnarValue::Scalar(ref sv) = dist_casted {
+            if sv.is_null() {
+                None
+            } else {
+                Some(BufferStyle::new(f64::try_from(sv.clone()).map_err(|e| DataFusionError::External(Box::new(e)))?))
+            }
+        } else {
+            return Err(DataFusionError::Execution("st_buffer: distance must be a scalar".into()));
+        };
+
         let arrays = ColumnarValue::values_to_arrays(&args.args)?;
         let geom_col = as_binary_array(&arrays[0])?;
-        let dist_col = arrays[1].as_any().downcast_ref::<Float64Array>().unwrap();
 
         let mut builder = BinaryBuilder::with_capacity(geom_col.len(), geom_col.len() * 128);
-        for (b, d) in geom_col.iter().zip(dist_col.iter()) {
-            match (b, d) {
-                (Some(bytes), Some(dist)) => {
+        for b in geom_col.iter() {
+            match (b, params.clone()) {
+                (Some(bytes), Some(style)) => {
                     let result = (|| -> Option<Vec<u8>> {
                         let g = wkb_to_geo(read_wkb(bytes).ok()?).ok()?;
-                        let style = BufferStyle::new(dist);
                         let buffered = g.buffer_with_style(style);
                         geom_to_wkb(&Geometry::MultiPolygon(buffered)).ok()
                     })();

@@ -18,9 +18,9 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::array::{Array, ArrayRef, BinaryArray, BinaryBuilder, Float64Array};
+use arrow::array::{Array, ArrayRef, BinaryBuilder};
 use arrow::datatypes::DataType;
-use datafusion::common::Result as DataFusionResult;
+use datafusion::common::{DataFusionError, Result as DataFusionResult};
 use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, TypeSignature, Volatility};
 use geo::Simplify;
 use geo_types::Geometry;
@@ -53,13 +53,20 @@ impl ScalarUDFImpl for StSimplify {
     fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> { Ok(DataType::Binary) }
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
+        // SedonaDB pattern: cast tolerance to Float64 scalar before the loop
+        let tol_casted = args.args[1].cast_to(&DataType::Float64, None)?;
+        let tolerance: Option<f64> = if let ColumnarValue::Scalar(ref sv) = tol_casted {
+            if sv.is_null() { None } else { Some(f64::try_from(sv.clone()).map_err(|e| DataFusionError::External(Box::new(e)))?) }
+        } else {
+            return Err(DataFusionError::Execution("st_simplify: tolerance must be a scalar".into()));
+        };
+
         let arrays = ColumnarValue::values_to_arrays(&args.args)?;
         let geom_col = as_binary_array(&arrays[0])?;
-        let tol_col = arrays[1].as_any().downcast_ref::<Float64Array>().unwrap();
 
         let mut builder = BinaryBuilder::with_capacity(geom_col.len(), geom_col.len() * 64);
-        for (b, t) in geom_col.iter().zip(tol_col.iter()) {
-            match (b, t) {
+        for b in geom_col.iter() {
+            match (b, tolerance) {
                 (Some(bytes), Some(tol)) => {
                     let result = (|| -> Option<Vec<u8>> {
                         let g = wkb_to_geo(read_wkb(bytes).ok()?).ok()?;
@@ -81,10 +88,10 @@ impl ScalarUDFImpl for StSimplify {
 
 fn simplify_geom(geom: &Geometry, epsilon: f64) -> Geometry {
     match geom {
-        Geometry::LineString(ls) => Geometry::LineString(ls.simplify(epsilon)),
-        Geometry::MultiLineString(mls) => Geometry::MultiLineString(mls.simplify(epsilon)),
-        Geometry::Polygon(p) => Geometry::Polygon(p.simplify(epsilon)),
-        Geometry::MultiPolygon(mp) => Geometry::MultiPolygon(mp.simplify(epsilon)),
+        Geometry::LineString(ls) => Geometry::LineString(ls.simplify(&epsilon)),
+        Geometry::MultiLineString(mls) => Geometry::MultiLineString(mls.simplify(&epsilon)),
+        Geometry::Polygon(p) => Geometry::Polygon(p.simplify(&epsilon)),
+        Geometry::MultiPolygon(mp) => Geometry::MultiPolygon(mp.simplify(&epsilon)),
         Geometry::GeometryCollection(gc) => Geometry::GeometryCollection(
             geo_types::GeometryCollection(gc.0.iter().map(|g| simplify_geom(g, epsilon)).collect())
         ),
