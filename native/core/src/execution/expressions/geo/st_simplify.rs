@@ -75,10 +75,10 @@ impl ScalarUDFImpl for StSimplify {
 
 fn simplify_geom(geom: &Geometry, epsilon: f64) -> Geometry {
     match geom {
-        Geometry::LineString(ls) => Geometry::LineString(ls.simplify(&epsilon)),
-        Geometry::MultiLineString(mls) => Geometry::MultiLineString(mls.simplify(&epsilon)),
-        Geometry::Polygon(p) => Geometry::Polygon(p.simplify(&epsilon)),
-        Geometry::MultiPolygon(mp) => Geometry::MultiPolygon(mp.simplify(&epsilon)),
+        Geometry::LineString(ls) => Geometry::LineString(ls.simplify(epsilon)),
+        Geometry::MultiLineString(mls) => Geometry::MultiLineString(mls.simplify(epsilon)),
+        Geometry::Polygon(p) => Geometry::Polygon(p.simplify(epsilon)),
+        Geometry::MultiPolygon(mp) => Geometry::MultiPolygon(mp.simplify(epsilon)),
         Geometry::GeometryCollection(gc) => Geometry::GeometryCollection(
             geo_types::GeometryCollection(gc.0.iter().map(|g| simplify_geom(g, epsilon)).collect())
         ),

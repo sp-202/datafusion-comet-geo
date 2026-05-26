@@ -75,10 +75,10 @@ impl ScalarUDFImpl for StSimplifyPreserveTopology {
 
 fn simplify_vw_preserve_geom(geom: &Geometry, epsilon: f64) -> Geometry {
     match geom {
-        Geometry::LineString(ls) => Geometry::LineString(ls.simplify_vw_preserve(&epsilon)),
-        Geometry::MultiLineString(mls) => Geometry::MultiLineString(mls.simplify_vw_preserve(&epsilon)),
-        Geometry::Polygon(p) => Geometry::Polygon(p.simplify_vw_preserve(&epsilon)),
-        Geometry::MultiPolygon(mp) => Geometry::MultiPolygon(mp.simplify_vw_preserve(&epsilon)),
+        Geometry::LineString(ls) => Geometry::LineString(ls.simplify_vw_preserve(epsilon)),
+        Geometry::MultiLineString(mls) => Geometry::MultiLineString(mls.simplify_vw_preserve(epsilon)),
+        Geometry::Polygon(p) => Geometry::Polygon(p.simplify_vw_preserve(epsilon)),
+        Geometry::MultiPolygon(mp) => Geometry::MultiPolygon(mp.simplify_vw_preserve(epsilon)),
         Geometry::GeometryCollection(gc) => Geometry::GeometryCollection(
             geo_types::GeometryCollection(gc.0.iter().map(|g| simplify_vw_preserve_geom(g, epsilon)).collect())
         ),
