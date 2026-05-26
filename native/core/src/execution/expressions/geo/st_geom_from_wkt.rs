@@ -19,8 +19,9 @@ use std::any::Any;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use arrow::array::{Array, ArrayRef, BinaryBuilder};
+use arrow::array::{ArrayRef, BinaryBuilder};
 use arrow::datatypes::DataType;
+use datafusion::common::cast::as_string_view_array;
 use datafusion::common::Result as DataFusionResult;
 use datafusion::logical_expr::{
     ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, TypeSignature, Volatility,
@@ -58,12 +59,10 @@ impl ScalarUDFImpl for StGeomFromWkt {
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
         let arrays = ColumnarValue::values_to_arrays(&args.args)?;
-        let arr = &arrays[0];
-        let col = arrow::compute::cast(arr, &DataType::Utf8)?;
-        let col = col
-            .as_any()
-            .downcast_ref::<arrow::array::StringArray>()
-            .unwrap();
+        let arg_array = ColumnarValue::Array(arrays[0].clone())
+            .cast_to(&DataType::Utf8View, None)?
+            .to_array(arrays[0].len())?;
+        let col = as_string_view_array(&arg_array)?;
 
         let mut builder = BinaryBuilder::with_capacity(col.len(), col.len() * 64);
         for v in col.iter() {
