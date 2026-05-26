@@ -18,7 +18,7 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, BinaryBuilder};
+use arrow::array::{Array, ArrayRef, BinaryBuilder};
 use arrow::datatypes::DataType;
 use datafusion::common::cast::as_string_view_array;
 use datafusion::common::Result as DataFusionResult;
