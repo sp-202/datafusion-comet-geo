@@ -19,6 +19,9 @@
 //!
 //! Ported from sedona-db/rust/sedona-geo/src/to_geo.rs (Apache-2.0).
 
+use arrow::array::{Array, ArrayRef, BinaryArray};
+use arrow::compute::cast;
+use arrow::datatypes::DataType;
 use datafusion::common::{DataFusionError, Result as DataFusionResult};
 use geo_traits::{
     to_geo::{
@@ -53,6 +56,18 @@ pub fn geom_to_wkb(geom: &Geometry) -> DataFusionResult<Vec<u8>> {
     write_geometry(&mut buf, geom, &WKB_WRITE_OPTS)
         .map_err(|e| DataFusionError::External(Box::new(e)))?;
     Ok(buf)
+}
+
+/// Cast any binary column (Binary, LargeBinary, BinaryView) to BinaryArray.
+/// Parquet may store WKB as LargeBinary — this normalises it transparently.
+pub fn as_binary_array(arr: &ArrayRef) -> DataFusionResult<BinaryArray> {
+    let casted = cast(arr.as_ref(), &DataType::Binary)
+        .map_err(|e| DataFusionError::External(Box::new(e)))?;
+    casted
+        .as_any()
+        .downcast_ref::<BinaryArray>()
+        .cloned()
+        .ok_or_else(|| DataFusionError::Execution("expected BinaryArray after cast".into()))
 }
 
 /// Convert a `Wkb<'_>` (or any `GeometryTrait`) into a `geo_types::Geometry`.

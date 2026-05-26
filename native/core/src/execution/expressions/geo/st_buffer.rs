@@ -25,7 +25,7 @@ use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl,
 use geo::algorithm::buffer::{Buffer, BufferStyle};
 use geo_types::Geometry;
 
-use super::wkb_util::{geom_to_wkb, read_wkb, wkb_to_geo};
+use super::wkb_util::{geom_to_wkb, read_wkb, wkb_to_geo, as_binary_array};
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub struct StBuffer {
@@ -35,7 +35,13 @@ pub struct StBuffer {
 impl Default for StBuffer {
     fn default() -> Self {
         Self {
-            signature: Signature::exact(vec![DataType::Binary, DataType::Float64], Volatility::Immutable),
+            signature: Signature::one_of(
+                vec![
+                    TypeSignature::Exact(vec![DataType::Binary, DataType::Float64]),
+                    TypeSignature::Exact(vec![DataType::LargeBinary, DataType::Float64]),
+                ],
+                Volatility::Immutable,
+            ),
         }
     }
 }
@@ -48,7 +54,7 @@ impl ScalarUDFImpl for StBuffer {
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
         let arrays = ColumnarValue::values_to_arrays(&args.args)?;
-        let geom_col = arrays[0].as_any().downcast_ref::<BinaryArray>().unwrap();
+        let geom_col = as_binary_array(&arrays[0])?;
         let dist_col = arrays[1].as_any().downcast_ref::<Float64Array>().unwrap();
 
         let mut builder = BinaryBuilder::with_capacity(geom_col.len(), geom_col.len() * 128);

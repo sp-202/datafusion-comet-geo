@@ -25,7 +25,7 @@ use datafusion::common::Result as DataFusionResult;
 use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
 use geo::Centroid;
 
-use super::wkb_util::{read_wkb, wkb_to_geo};
+use super::wkb_util::{read_wkb, wkb_to_geo, as_binary_array};
 
 const EARTH_RADIUS_METERS: f64 = 6_371_008.8;
 
@@ -37,7 +37,15 @@ pub struct StDistanceSphere {
 impl Default for StDistanceSphere {
     fn default() -> Self {
         Self {
-            signature: Signature::exact(vec![DataType::Binary, DataType::Binary], Volatility::Immutable),
+            signature: Signature::one_of(
+                vec![
+                    TypeSignature::Exact(vec![DataType::Binary, DataType::Binary]),
+                    TypeSignature::Exact(vec![DataType::LargeBinary, DataType::LargeBinary]),
+                    TypeSignature::Exact(vec![DataType::Binary, DataType::LargeBinary]),
+                    TypeSignature::Exact(vec![DataType::LargeBinary, DataType::Binary]),
+                ],
+                Volatility::Immutable,
+            ),
         }
     }
 }
@@ -50,8 +58,8 @@ impl ScalarUDFImpl for StDistanceSphere {
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
         let arrays = ColumnarValue::values_to_arrays(&args.args)?;
-        let col1 = arrays[0].as_any().downcast_ref::<BinaryArray>().unwrap();
-        let col2 = arrays[1].as_any().downcast_ref::<BinaryArray>().unwrap();
+        let col1 = as_binary_array(&arrays[0])?;
+        let col2 = as_binary_array(&arrays[1])?;
 
         let result: Float64Array = col1.iter().zip(col2.iter())
             .map(|(b1, b2)| {

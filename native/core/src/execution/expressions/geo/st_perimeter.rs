@@ -25,7 +25,7 @@ use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl,
 use geo::algorithm::line_measures::{Euclidean, Length};
 use geo_types::Geometry;
 
-use super::wkb_util::{read_wkb, wkb_to_geo};
+use super::wkb_util::{read_wkb, wkb_to_geo, as_binary_array};
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub struct StPerimeter {
@@ -35,7 +35,14 @@ pub struct StPerimeter {
 impl Default for StPerimeter {
     fn default() -> Self {
         Self {
-            signature: Signature::exact(vec![DataType::Binary], Volatility::Immutable),
+            signature: Signature::one_of(
+                vec![
+                    TypeSignature::Exact(vec![DataType::Binary]),
+                    TypeSignature::Exact(vec![DataType::LargeBinary]),
+                    TypeSignature::Exact(vec![DataType::BinaryView]),
+                ],
+                Volatility::Immutable,
+            ),
         }
     }
 }
@@ -48,7 +55,7 @@ impl ScalarUDFImpl for StPerimeter {
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
         let arrays = ColumnarValue::values_to_arrays(&args.args)?;
-        let col = arrays[0].as_any().downcast_ref::<BinaryArray>().unwrap();
+        let col = as_binary_array(&arrays[0])?;
 
         let result: Float64Array = col.iter()
             .map(|b| {

@@ -24,7 +24,7 @@ use datafusion::common::Result as DataFusionResult;
 use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
 use geo_types::{Geometry, LineString, MultiLineString, MultiPoint};
 
-use super::wkb_util::{geom_to_wkb, read_wkb, wkb_to_geo};
+use super::wkb_util::{geom_to_wkb, read_wkb, wkb_to_geo, as_binary_array};
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub struct StBoundary {
@@ -34,7 +34,14 @@ pub struct StBoundary {
 impl Default for StBoundary {
     fn default() -> Self {
         Self {
-            signature: Signature::exact(vec![DataType::Binary], Volatility::Immutable),
+            signature: Signature::one_of(
+                vec![
+                    TypeSignature::Exact(vec![DataType::Binary]),
+                    TypeSignature::Exact(vec![DataType::LargeBinary]),
+                    TypeSignature::Exact(vec![DataType::BinaryView]),
+                ],
+                Volatility::Immutable,
+            ),
         }
     }
 }
@@ -47,7 +54,7 @@ impl ScalarUDFImpl for StBoundary {
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
         let arrays = ColumnarValue::values_to_arrays(&args.args)?;
-        let col = arrays[0].as_any().downcast_ref::<BinaryArray>().unwrap();
+        let col = as_binary_array(&arrays[0])?;
 
         let mut builder = BinaryBuilder::with_capacity(col.len(), col.len() * 64);
         for b in col.iter() {

@@ -25,7 +25,7 @@ use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl,
 use geo::BooleanOps;
 use geo_types::{Geometry, MultiPolygon};
 
-use super::wkb_util::{geom_to_wkb, read_wkb, wkb_to_geo};
+use super::wkb_util::{geom_to_wkb, read_wkb, wkb_to_geo, as_binary_array};
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub struct StSymDifference {
@@ -35,7 +35,15 @@ pub struct StSymDifference {
 impl Default for StSymDifference {
     fn default() -> Self {
         Self {
-            signature: Signature::exact(vec![DataType::Binary, DataType::Binary], Volatility::Immutable),
+            signature: Signature::one_of(
+                vec![
+                    TypeSignature::Exact(vec![DataType::Binary, DataType::Binary]),
+                    TypeSignature::Exact(vec![DataType::LargeBinary, DataType::LargeBinary]),
+                    TypeSignature::Exact(vec![DataType::Binary, DataType::LargeBinary]),
+                    TypeSignature::Exact(vec![DataType::LargeBinary, DataType::Binary]),
+                ],
+                Volatility::Immutable,
+            ),
         }
     }
 }
@@ -48,8 +56,8 @@ impl ScalarUDFImpl for StSymDifference {
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
         let arrays = ColumnarValue::values_to_arrays(&args.args)?;
-        let col1 = arrays[0].as_any().downcast_ref::<BinaryArray>().unwrap();
-        let col2 = arrays[1].as_any().downcast_ref::<BinaryArray>().unwrap();
+        let col1 = as_binary_array(&arrays[0])?;
+        let col2 = as_binary_array(&arrays[1])?;
 
         let mut builder = BinaryBuilder::with_capacity(col1.len(), col1.len() * 128);
         for (b1, b2) in col1.iter().zip(col2.iter()) {

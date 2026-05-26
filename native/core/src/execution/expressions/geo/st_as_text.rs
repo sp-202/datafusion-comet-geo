@@ -23,7 +23,7 @@ use arrow::datatypes::DataType;
 use datafusion::common::{DataFusionError, Result as DataFusionResult};
 use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
 
-use super::wkb_util::read_wkb;
+use super::wkb_util::{read_wkb, as_binary_array};
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub struct StAsText {
@@ -33,7 +33,14 @@ pub struct StAsText {
 impl Default for StAsText {
     fn default() -> Self {
         Self {
-            signature: Signature::exact(vec![DataType::Binary], Volatility::Immutable),
+            signature: Signature::one_of(
+                vec![
+                    TypeSignature::Exact(vec![DataType::Binary]),
+                    TypeSignature::Exact(vec![DataType::LargeBinary]),
+                    TypeSignature::Exact(vec![DataType::BinaryView]),
+                ],
+                Volatility::Immutable,
+            ),
         }
     }
 }
@@ -46,7 +53,7 @@ impl ScalarUDFImpl for StAsText {
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
         let arrays = ColumnarValue::values_to_arrays(&args.args)?;
-        let col = arrays[0].as_any().downcast_ref::<BinaryArray>().unwrap();
+        let col = as_binary_array(&arrays[0])?;
 
         let mut builder = StringBuilder::with_capacity(col.len(), col.len() * 25);
         for b in col.iter() {
