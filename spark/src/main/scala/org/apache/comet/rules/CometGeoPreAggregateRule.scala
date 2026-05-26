@@ -27,16 +27,15 @@ import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.comet.expressions.CometGeoExpression
 
 /**
- * Rewrites Aggregate and Window nodes that reference geo expressions in their
- * grouping keys, aggregate inputs, or window specs into a two-level plan:
+ * Rewrites Aggregate and Window nodes that reference geo expressions in their grouping keys,
+ * aggregate inputs, or window specs into a two-level plan:
  *
- *   Project (pre-materialize geo exprs as typed scalar aliases)
- *     +-- original child
+ * Project (pre-materialize geo exprs as typed scalar aliases) +-- original child
  *
- * followed by the original Aggregate/Window operating only on the scalar
- * Attribute references.  This ensures geo UDFs are always evaluated inside
- * CometProject (above CometNativeScan) and never re-evaluated by JVM
- * HashAggregateExec or WindowExec codegen, which has no native geo path.
+ * followed by the original Aggregate/Window operating only on the scalar Attribute references.
+ * This ensures geo UDFs are always evaluated inside CometProject (above CometNativeScan) and
+ * never re-evaluated by JVM HashAggregateExec or WindowExec codegen, which has no native geo
+ * path.
  */
 case class CometGeoPreAggregateRule(session: SparkSession) extends Rule[LogicalPlan] {
 
@@ -60,8 +59,8 @@ case class CometGeoPreAggregateRule(session: SparkSession) extends Rule[LogicalP
       agg.groupingExpressions ++ agg.aggregateExpressions.flatMap(_.children))
 
     val newGrouping = agg.groupingExpressions.map(replaceGeo(_, subst))
-    val newAggExprs = agg.aggregateExpressions.map(
-      e => replaceGeo(e, subst).asInstanceOf[NamedExpression])
+    val newAggExprs =
+      agg.aggregateExpressions.map(e => replaceGeo(e, subst).asInstanceOf[NamedExpression])
 
     agg.copy(
       groupingExpressions = newGrouping,
@@ -83,8 +82,8 @@ case class CometGeoPreAggregateRule(session: SparkSession) extends Rule[LogicalP
 
     val (newChild, subst) = liftGeoExprs(win.child, candidateExprs)
 
-    val newWindowExprs = win.windowExpressions.map(
-      e => replaceGeo(e, subst).asInstanceOf[NamedExpression])
+    val newWindowExprs =
+      win.windowExpressions.map(e => replaceGeo(e, subst).asInstanceOf[NamedExpression])
     val newPartitionSpec = win.partitionSpec.map(replaceGeo(_, subst))
     val newOrderSpec = win.orderSpec.map(s => s.copy(child = replaceGeo(s.child, subst)))
 
