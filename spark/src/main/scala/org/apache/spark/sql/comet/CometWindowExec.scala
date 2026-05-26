@@ -21,7 +21,30 @@ package org.apache.spark.sql.comet
 
 import scala.jdk.CollectionConverters._
 
-import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, AttributeReference, AttributeSet, CurrentRow, Expression, FrameLessOffsetWindowFunction, Lag, Lead, NamedExpression, RangeFrame, RowFrame, SortOrder, SpecifiedWindowFrame, UnboundedFollowing, UnboundedPreceding, WindowExpression}
+import org.apache.spark.sql.catalyst.expressions.{
+  Alias,
+  Attribute,
+  AttributeSet,
+  CumeDist,
+  CurrentRow,
+  DenseRank,
+  Expression,
+  Lag,
+  Lead,
+  NamedExpression,
+  NTile,
+  NthValue,
+  PercentRank,
+  Rank,
+  RangeFrame,
+  RowFrame,
+  RowNumber,
+  SortOrder,
+  SpecifiedWindowFrame,
+  UnboundedFollowing,
+  UnboundedPreceding,
+  WindowExpression
+}
 import org.apache.spark.sql.catalyst.expressions.aggregate.{AggregateExpression, Complete, Count, Max, Min, Sum}
 import org.apache.spark.sql.catalyst.plans.physical.Partitioning
 import org.apache.spark.sql.execution.SparkPlan
@@ -34,7 +57,7 @@ import com.google.common.base.Objects
 
 import org.apache.comet.{CometConf, ConfigEntry}
 import org.apache.comet.CometSparkSessionExtensions.withInfo
-import org.apache.comet.serde.{AggSerde, CometOperatorSerde, Incompatible, OperatorOuterClass, SupportLevel}
+import org.apache.comet.serde.{AggSerde, Compatible, CometOperatorSerde, OperatorOuterClass, SupportLevel}
 import org.apache.comet.serde.OperatorOuterClass.Operator
 import org.apache.comet.serde.QueryPlanSerde.{aggExprToProto, exprToProto, scalarFunctionExprToProto}
 
@@ -43,9 +66,7 @@ object CometWindowExec extends CometOperatorSerde[WindowExec] {
   override def enabledConfig: Option[ConfigEntry[Boolean]] = Some(
     CometConf.COMET_EXEC_WINDOW_ENABLED)
 
-  override def getSupportLevel(op: WindowExec): SupportLevel = {
-    Incompatible(Some("Native WindowExec has known correctness issues"))
-  }
+  override def getSupportLevel(op: WindowExec): SupportLevel = Compatible()
 
   override def convert(
       op: WindowExec,
@@ -69,16 +90,6 @@ object CometWindowExec extends CometOperatorSerde[WindowExec] {
 
     if (winExprs.length != op.windowExpression.length) {
       withInfo(op, "Unsupported window expression(s)")
-      return None
-    }
-
-    // Offset window functions (LAG, LEAD) support arbitrary partition and order specs, so skip
-    // the validatePartitionAndSortSpecsForWindowFunc check which requires partition columns to
-    // equal order columns. That stricter check is only needed for aggregate window functions.
-    val hasOnlyOffsetFunctions = winExprs.nonEmpty &&
-      winExprs.forall(e => e.windowFunction.isInstanceOf[FrameLessOffsetWindowFunction])
-    if (!hasOnlyOffsetFunctions && op.partitionSpec.nonEmpty && op.orderSpec.nonEmpty &&
-      !validatePartitionAndSortSpecsForWindowFunc(op.partitionSpec, op.orderSpec, op)) {
       return None
     }
 
@@ -164,8 +175,26 @@ object CometWindowExec extends CometOperatorSerde[WindowExec] {
           val defaultExpr = exprToProto(lead.default, output)
           val func = scalarFunctionExprToProto("lead", inputExpr, offsetExpr, defaultExpr)
           (None, func, lead.ignoreNulls)
+        case _: RowNumber =>
+          (None, scalarFunctionExprToProto("row_number"), false)
+        case _: Rank =>
+          (None, scalarFunctionExprToProto("rank"), false)
+        case _: DenseRank =>
+          (None, scalarFunctionExprToProto("dense_rank"), false)
+        case _: PercentRank =>
+          (None, scalarFunctionExprToProto("percent_rank"), false)
+        case _: CumeDist =>
+          (None, scalarFunctionExprToProto("cume_dist"), false)
+        case ntile: NTile =>
+          val nExpr = exprToProto(ntile.buckets, output)
+          (None, scalarFunctionExprToProto("ntile", nExpr), false)
+        case nv: NthValue =>
+          val inputExpr = exprToProto(nv.input, output)
+          val offsetExpr = exprToProto(nv.offset, output)
+          (None, scalarFunctionExprToProto("nth_value", inputExpr, offsetExpr), nv.ignoreNulls)
         case _ =>
-          (None, exprToProto(windowExpr.windowFunction, output), false)
+          withInfo(windowExpr, s"unsupported window function: ${windowExpr.windowFunction}")
+          (None, None, false)
       }
     }
 
@@ -298,40 +327,6 @@ object CometWindowExec extends CometOperatorSerde[WindowExec] {
       op.orderSpec,
       op.child,
       SerializedPlan(None))
-  }
-
-  private def validatePartitionAndSortSpecsForWindowFunc(
-      partitionSpec: Seq[Expression],
-      orderSpec: Seq[SortOrder],
-      op: SparkPlan): Boolean = {
-    if (partitionSpec.length != orderSpec.length) {
-      return false
-    }
-
-    val partitionColumnNames = partitionSpec.collect {
-      case a: AttributeReference => a.name
-      case other =>
-        withInfo(op, s"Unsupported partition expression: ${other.getClass.getSimpleName}")
-        return false
-    }
-
-    val orderColumnNames = orderSpec.collect { case s: SortOrder =>
-      s.child match {
-        case a: AttributeReference => a.name
-        case other =>
-          withInfo(op, s"Unsupported sort expression: ${other.getClass.getSimpleName}")
-          return false
-      }
-    }
-
-    if (partitionColumnNames.zip(orderColumnNames).exists { case (partCol, orderCol) =>
-        partCol != orderCol
-      }) {
-      withInfo(op, "Partitioning and sorting specifications must be the same.")
-      return false
-    }
-
-    true
   }
 
 }
