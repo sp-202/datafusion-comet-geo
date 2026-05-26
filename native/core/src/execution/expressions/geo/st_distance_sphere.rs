@@ -19,7 +19,7 @@ use std::any::Any;
 use std::f64::consts::PI;
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, BinaryArray, Float64Array};
+use arrow::array::{ArrayRef, Float64Array};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
 use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, TypeSignature, Volatility};
