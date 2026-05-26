@@ -22,7 +22,7 @@ use arrow::array::{Array, ArrayRef, BinaryArray, Float64Array};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
 use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
-use geo::EuclideanLength;
+use geo::algorithm::line_measures::{Euclidean, Length};
 use geo_types::Geometry;
 
 use super::wkb_util::{read_wkb, wkb_to_geo};
@@ -64,8 +64,8 @@ impl ScalarUDFImpl for StPerimeter {
 fn perimeter(geom: &Geometry) -> f64 {
     match geom {
         Geometry::Polygon(p) => {
-            p.exterior().euclidean_length()
-                + p.interiors().iter().map(|r| r.euclidean_length()).sum::<f64>()
+            Euclidean.length(p.exterior())
+                + p.interiors().iter().map(|r| Euclidean.length(r)).sum::<f64>()
         }
         Geometry::MultiPolygon(mp) => mp.0.iter().map(|p| perimeter(&Geometry::Polygon(p.clone()))).sum(),
         Geometry::GeometryCollection(gc) => gc.0.iter().map(perimeter).sum(),

@@ -22,7 +22,7 @@ use arrow::array::{ArrayRef, BinaryArray, Float64Array};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
 use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
-use geo::EuclideanDistance;
+use geo::algorithm::line_measures::{Distance, Euclidean};
 
 use super::wkb_util::{read_wkb, wkb_to_geo};
 
@@ -54,7 +54,7 @@ impl ScalarUDFImpl for StDistance {
             .map(|(b1, b2)| {
                 let g1 = wkb_to_geo(read_wkb(b1?).ok()?).ok()?;
                 let g2 = wkb_to_geo(read_wkb(b2?).ok()?).ok()?;
-                Some(g1.euclidean_distance(&g2))
+                Some(Euclidean.distance(&g1, &g2))
             })
             .collect();
 

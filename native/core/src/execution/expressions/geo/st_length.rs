@@ -22,7 +22,7 @@ use arrow::array::{Array, ArrayRef, BinaryArray, Float64Array};
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
 use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
-use geo::EuclideanLength;
+use geo::algorithm::line_measures::{Euclidean, Length};
 use geo_types::Geometry;
 
 use super::wkb_util::{read_wkb, wkb_to_geo};
@@ -63,9 +63,9 @@ impl ScalarUDFImpl for StLength {
 
 fn euclidean_length(geom: &Geometry) -> f64 {
     match geom {
-        Geometry::Line(l) => l.euclidean_length(),
-        Geometry::LineString(ls) => ls.euclidean_length(),
-        Geometry::MultiLineString(mls) => mls.euclidean_length(),
+        Geometry::Line(l) => Euclidean.length(l),
+        Geometry::LineString(ls) => Euclidean.length(ls),
+        Geometry::MultiLineString(mls) => Euclidean.length(mls),
         Geometry::GeometryCollection(gc) => gc.0.iter().map(euclidean_length).sum(),
         _ => 0.0,
     }

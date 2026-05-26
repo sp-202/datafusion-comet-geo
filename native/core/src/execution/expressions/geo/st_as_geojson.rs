@@ -77,7 +77,7 @@ fn geom_to_geojson(wkb: &wkb::reader::Wkb<'_>) -> DataFusionResult<String> {
     }
 
     let geo_geom = wkb_to_geo(wkb.clone())?;
-    let geojson_value = geojson::Value::from(&geo_geom);
+    let geojson_value = geojson::GeometryValue::from(&geo_geom);
     let geojson_geom = geojson::Geometry::new(geojson_value);
     serde_json::to_string(&geojson_geom).map_err(|e| DataFusionError::External(Box::new(e)))
 }
