@@ -23,6 +23,7 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, Expression, NamedExpression}
 import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, LogicalPlan, Project, Window}
 import org.apache.spark.sql.catalyst.rules.Rule
+
 import org.apache.comet.expressions.CometGeoExpression
 
 /**
@@ -30,7 +31,7 @@ import org.apache.comet.expressions.CometGeoExpression
  * grouping keys, aggregate inputs, or window specs into a two-level plan:
  *
  *   Project (pre-materialize geo exprs as typed scalar aliases)
- *     └── original child
+ *     +-- original child
  *
  * followed by the original Aggregate/Window operating only on the scalar
  * Attribute references.  This ensures geo UDFs are always evaluated inside
@@ -116,7 +117,7 @@ case class CometGeoPreAggregateRule(session: SparkSession) extends Rule[LogicalP
 
     val newChild = Project(newProjectList, child)
 
-    // Substitution map: original geo expr → the alias's output Attribute
+    // Substitution map: original geo expr -> the alias's output Attribute
     val subst: Map[Expression, Attribute] =
       aliases.map(a => a.child -> a.toAttribute).toMap
 
