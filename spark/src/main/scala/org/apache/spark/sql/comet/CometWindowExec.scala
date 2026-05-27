@@ -22,7 +22,7 @@ package org.apache.spark.sql.comet
 import scala.jdk.CollectionConverters._
 
 import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, AttributeSet, CumeDist, CurrentRow, DenseRank, Expression, Lag, Lead, NamedExpression, NthValue, NTile, PercentRank, RangeFrame, Rank, RowFrame, RowNumber, SortOrder, SpecifiedWindowFrame, UnboundedFollowing, UnboundedPreceding, WindowExpression}
-import org.apache.spark.sql.catalyst.expressions.aggregate.{AggregateExpression, Complete, Count, Max, Min, Sum}
+import org.apache.spark.sql.catalyst.expressions.aggregate.{AggregateExpression, Average, Complete, Count, Max, Min, Sum}
 import org.apache.spark.sql.catalyst.plans.physical.Partitioning
 import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.execution.metric.{SQLMetric, SQLMetrics}
@@ -119,6 +119,13 @@ object CometWindowExec extends CometOperatorSerde[WindowExec] {
                 Some(agg)
               } else {
                 withInfo(windowExpr, s"datatype ${s.dataType} is not supported", expr)
+                None
+              }
+            case avg: Average =>
+              if (AggSerde.avgDataTypeSupported(avg.dataType)) {
+                Some(agg)
+              } else {
+                withInfo(windowExpr, s"datatype ${avg.dataType} is not supported", expr)
                 None
               }
             case _ =>
