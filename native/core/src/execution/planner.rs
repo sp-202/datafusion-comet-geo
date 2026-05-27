@@ -1941,42 +1941,75 @@ impl PhysicalPlanner {
                     })
                     .collect();
 
+                let window_exprs_proto = &wnd.window_expr;
+                let window_expr_vec = window_expr?;
                 let window_agg = Arc::new(BoundedWindowAggExec::try_new(
-                    window_expr?,
+                    window_expr_vec,
                     Arc::clone(&child.native_plan),
                     InputOrderMode::Sorted,
                     !partition_exprs.is_empty(),
                 )?);
 
-                // DataFusion ranking functions (row_number, rank, dense_rank, etc.) produce
-                // UInt64 output, but Spark expects Int64 (LongType). Insert a projection to
-                // cast any UInt64 window output columns to Int64.
+                // DataFusion ranking functions (row_number, rank, dense_rank, ntile, etc.)
+                // produce unsigned integer output (UInt64), but Spark expects signed types
+                // (LongType for most, IntegerType for ntile). Use the Spark-declared output_type
+                // from the proto to cast each new window column to the correct Arrow type.
                 let window_schema = window_agg.schema();
-                let needs_cast = window_schema
-                    .fields()
-                    .iter()
-                    .any(|f| f.data_type() == &DataType::UInt64);
+                let child_col_count = input_schema.fields().len();
+                let needs_cast = window_exprs_proto.iter().enumerate().any(|(i, wp)| {
+                    let out_idx = child_col_count + i;
+                    if out_idx >= window_schema.fields().len() {
+                        return false;
+                    }
+                    let native_type = window_schema.field(out_idx).data_type();
+                    if let Some(spark_type) = wp.output_type.as_ref() {
+                        let arrow_type = to_arrow_datatype(spark_type);
+                        native_type != &arrow_type
+                    } else {
+                        false
+                    }
+                });
 
                 if needs_cast {
-                    let cast_exprs: Result<Vec<(Arc<dyn PhysicalExpr>, String)>, _> = window_schema
-                        .fields()
-                        .iter()
-                        .enumerate()
-                        .map(|(i, f)| {
-                            let col: Arc<dyn PhysicalExpr> =
-                                Arc::new(datafusion::physical_expr::expressions::Column::new(
-                                    f.name(),
-                                    i,
-                                ));
-                            let expr: Arc<dyn PhysicalExpr> =
-                                if f.data_type() == &DataType::UInt64 {
-                                    Arc::new(CastExpr::new(col, DataType::Int64, None))
-                                } else {
-                                    col
-                                };
-                            Ok((expr, f.name().clone()))
-                        })
-                        .collect();
+                    let cast_exprs: Result<Vec<(Arc<dyn PhysicalExpr>, String)>, ExecutionError> =
+                        window_schema
+                            .fields()
+                            .iter()
+                            .enumerate()
+                            .map(|(i, f)| {
+                                let col: Arc<dyn PhysicalExpr> = Arc::new(
+                                    datafusion::physical_expr::expressions::Column::new(
+                                        f.name(),
+                                        i,
+                                    ),
+                                );
+                                // Only cast window output columns (after child columns) when
+                                // the native type differs from what Spark declared.
+                                let expr: Arc<dyn PhysicalExpr> =
+                                    if i >= child_col_count {
+                                        let win_idx = i - child_col_count;
+                                        if let Some(wp) = window_exprs_proto.get(win_idx) {
+                                            if let Some(spark_type) = wp.output_type.as_ref() {
+                                                let arrow_type = to_arrow_datatype(spark_type);
+                                                if f.data_type() != &arrow_type {
+                                                    Arc::new(CastExpr::new(
+                                                        col, arrow_type, None,
+                                                    ))
+                                                } else {
+                                                    col
+                                                }
+                                            } else {
+                                                col
+                                            }
+                                        } else {
+                                            col
+                                        }
+                                    } else {
+                                        col
+                                    };
+                                Ok((expr, f.name().clone()))
+                            })
+                            .collect();
                     let projection = Arc::new(
                         ProjectionExec::try_new(cast_exprs?, Arc::clone(&window_agg) as _)
                             .map_err(|e| ExecutionError::DataFusionError(e.to_string()))?,

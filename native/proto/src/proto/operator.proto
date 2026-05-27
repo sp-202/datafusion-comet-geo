@@ -403,6 +403,9 @@ message WindowExpr {
   spark.spark_expression.AggExpr agg_func = 2;
   WindowSpecDefinition spec = 3;
   bool ignore_nulls = 4;
+  // Spark-declared output DataType for this window expression. Used by the native
+  // engine to cast the DataFusion result (e.g. UInt64) to the correct Arrow type.
+  spark.spark_expression.DataType output_type = 5;
 }
 
 enum WindowFrameType {

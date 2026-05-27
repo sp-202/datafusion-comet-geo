@@ -36,7 +36,7 @@ import org.apache.comet.{CometConf, ConfigEntry}
 import org.apache.comet.CometSparkSessionExtensions.withInfo
 import org.apache.comet.serde.{AggSerde, CometOperatorSerde, Compatible, OperatorOuterClass, SupportLevel}
 import org.apache.comet.serde.OperatorOuterClass.Operator
-import org.apache.comet.serde.QueryPlanSerde.{aggExprToProto, exprToProto, scalarFunctionExprToProto}
+import org.apache.comet.serde.QueryPlanSerde.{aggExprToProto, exprToProto, scalarFunctionExprToProto, serializeDataType}
 
 object CometWindowExec extends CometOperatorSerde[WindowExec] {
 
@@ -274,21 +274,25 @@ object CometWindowExec extends CometOperatorSerde[WindowExec] {
     val spec =
       OperatorOuterClass.WindowSpecDefinition.newBuilder().setFrameSpecification(frame).build()
 
+    // Serialize the Spark-declared output type so the native engine can cast
+    // DataFusion's output (e.g. UInt64 for row_number/rank) to the correct type.
+    val outputTypeProto = serializeDataType(windowExpr.dataType)
+
     if (builtinFunc.isDefined) {
-      Some(
-        OperatorOuterClass.WindowExpr
-          .newBuilder()
-          .setBuiltInWindowFunction(builtinFunc.get)
-          .setSpec(spec)
-          .setIgnoreNulls(ignoreNulls)
-          .build())
+      val b = OperatorOuterClass.WindowExpr
+        .newBuilder()
+        .setBuiltInWindowFunction(builtinFunc.get)
+        .setSpec(spec)
+        .setIgnoreNulls(ignoreNulls)
+      outputTypeProto.foreach(b.setOutputType)
+      Some(b.build())
     } else if (aggExpr.isDefined) {
-      Some(
-        OperatorOuterClass.WindowExpr
-          .newBuilder()
-          .setAggFunc(aggExpr.get)
-          .setSpec(spec)
-          .build())
+      val b = OperatorOuterClass.WindowExpr
+        .newBuilder()
+        .setAggFunc(aggExpr.get)
+        .setSpec(spec)
+      outputTypeProto.foreach(b.setOutputType)
+      Some(b.build())
     } else {
       None
     }
