@@ -35,6 +35,7 @@ object CometGeoFallback {
         s"or Apache Sedona on the classpath for JVM fallback.")
 
   // Constructors - return WKB bytes
+  def geomFromWkb(g: Array[Byte]): Array[Byte] = notSupported("st_geomfromwkb")
   def geomFromWkt(g: String): Array[Byte] = notSupported("st_geomfromwkt")
   def geomFromGeoJson(g: String): Array[Byte] = notSupported("st_geomfromgeojson")
   def makeEnvelope(xmin: Double, ymin: Double, xmax: Double, ymax: Double): Array[Byte] =
@@ -44,6 +45,7 @@ object CometGeoFallback {
   // Serializers - asText returns String (WKT), asGeoJson returns String (JSON)
   def asText(g: Array[Byte]): String = notSupported("st_astext")
   def asGeoJson(g: Array[Byte]): String = notSupported("st_asgeojson")
+  def asBinary(g: Array[Byte]): Array[Byte] = g
   // Predicates - take WKB bytes
   def contains(g1: Array[Byte], g2: Array[Byte]): Boolean = notSupported("st_contains")
   def intersects(g1: Array[Byte], g2: Array[Byte]): Boolean = notSupported("st_intersects")
@@ -82,8 +84,18 @@ object CometGeoFallback {
     notSupported("st_symdifference")
   // Accessors
   def isEmpty(g: Array[Byte]): Boolean = notSupported("st_isempty")
+  def isValid(g: Array[Byte]): Boolean = notSupported("st_isvalid")
   def geometryType(g: Array[Byte]): String = notSupported("st_geometrytype")
   def numPoints(g: Array[Byte]): Long = notSupported("st_numpoints")
+  def numGeometries(g: Array[Byte]): Int = notSupported("st_numgeometries")
+  def dimension(g: Array[Byte]): Int = notSupported("st_dimension")
+  def srid(g: Array[Byte]): Int = notSupported("st_srid")
   def stX(g: Array[Byte]): Double = notSupported("st_x")
   def stY(g: Array[Byte]): Double = notSupported("st_y")
+  def startPoint(g: Array[Byte]): Array[Byte] = notSupported("st_startpoint")
+  def endPoint(g: Array[Byte]): Array[Byte] = notSupported("st_endpoint")
+  def exteriorRing(g: Array[Byte]): Array[Byte] = notSupported("st_exteriorring")
+  def numInteriorRings(g: Array[Byte]): Int = notSupported("st_numinteriorrings")
+  def translate(g: Array[Byte], dx: Double, dy: Double): Array[Byte] =
+    notSupported("st_translate")
 }

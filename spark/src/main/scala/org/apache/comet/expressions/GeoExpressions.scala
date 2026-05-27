@@ -392,6 +392,40 @@ case class StBuffer(left: Expression, right: Expression)
 
 // ---- Constructors --------------------------------------------------------
 
+// StGeomFromWkb takes Binary (WKB) and returns Binary (WKB) — validates and normalises
+case class StGeomFromWkb(child: Expression)
+    extends UnaryExpression
+    with NullIntolerant
+    with CometGeoExpression {
+  override def foldable: Boolean = false
+  override def dataType: DataType = BinaryType
+  override def nullSafeEval(g: Any): Any =
+    CometGeoFallback.geomFromWkb(g.asInstanceOf[Array[Byte]])
+  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
+    defineCodeGen(
+      ctx,
+      ev,
+      g =>
+        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$" +
+          s".geomFromWkb((byte[]) $g)")
+  override protected def withNewChildInternal(newChild: Expression): Expression =
+    copy(child = newChild)
+}
+
+// StAsBinary takes Binary (WKB geometry) and returns Binary (raw WKB bytes)
+case class StAsBinary(child: Expression)
+    extends UnaryExpression
+    with NullIntolerant
+    with CometGeoExpression {
+  override def foldable: Boolean = false
+  override def dataType: DataType = BinaryType
+  override def nullSafeEval(g: Any): Any = g.asInstanceOf[Array[Byte]]
+  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
+    defineCodeGen(ctx, ev, g => s"(byte[]) $g")
+  override protected def withNewChildInternal(newChild: Expression): Expression =
+    copy(child = newChild)
+}
+
 // StGeomFromWkt takes a String (WKT) and returns Binary (WKB)
 case class StGeomFromWkt(child: Expression)
     extends UnaryExpression
@@ -788,6 +822,174 @@ case class StBoundary(child: Expression)
     copy(child = newChild)
 }
 
+// ---- New geo-parquet accessors and transformations -----------------------
+
+case class StIsValid(child: Expression)
+    extends UnaryExpression
+    with NullIntolerant
+    with CometGeoExpression {
+  override def foldable: Boolean = false
+  override def dataType: DataType = BooleanType
+  override def nullSafeEval(g: Any): Any =
+    CometGeoFallback.isValid(g.asInstanceOf[Array[Byte]])
+  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
+    defineCodeGen(
+      ctx,
+      ev,
+      g => s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$.isValid((byte[]) $g)")
+  override protected def withNewChildInternal(newChild: Expression): Expression =
+    copy(child = newChild)
+}
+
+case class StSrid(child: Expression)
+    extends UnaryExpression
+    with NullIntolerant
+    with CometGeoExpression {
+  override def foldable: Boolean = false
+  override def dataType: DataType = IntegerType
+  override def nullSafeEval(g: Any): Any =
+    CometGeoFallback.srid(g.asInstanceOf[Array[Byte]])
+  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
+    defineCodeGen(
+      ctx,
+      ev,
+      g => s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$.srid((byte[]) $g)")
+  override protected def withNewChildInternal(newChild: Expression): Expression =
+    copy(child = newChild)
+}
+
+case class StDimension(child: Expression)
+    extends UnaryExpression
+    with NullIntolerant
+    with CometGeoExpression {
+  override def foldable: Boolean = false
+  override def dataType: DataType = IntegerType
+  override def nullSafeEval(g: Any): Any =
+    CometGeoFallback.dimension(g.asInstanceOf[Array[Byte]])
+  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
+    defineCodeGen(
+      ctx,
+      ev,
+      g => s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$.dimension((byte[]) $g)")
+  override protected def withNewChildInternal(newChild: Expression): Expression =
+    copy(child = newChild)
+}
+
+case class StNumGeometries(child: Expression)
+    extends UnaryExpression
+    with NullIntolerant
+    with CometGeoExpression {
+  override def foldable: Boolean = false
+  override def dataType: DataType = IntegerType
+  override def nullSafeEval(g: Any): Any =
+    CometGeoFallback.numGeometries(g.asInstanceOf[Array[Byte]])
+  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
+    defineCodeGen(
+      ctx,
+      ev,
+      g =>
+        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$" +
+          s".numGeometries((byte[]) $g)")
+  override protected def withNewChildInternal(newChild: Expression): Expression =
+    copy(child = newChild)
+}
+
+case class StStartPoint(child: Expression)
+    extends UnaryExpression
+    with NullIntolerant
+    with CometGeoExpression {
+  override def foldable: Boolean = false
+  override def dataType: DataType = BinaryType
+  override def nullSafeEval(g: Any): Any =
+    CometGeoFallback.startPoint(g.asInstanceOf[Array[Byte]])
+  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
+    defineCodeGen(
+      ctx,
+      ev,
+      g => s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$.startPoint((byte[]) $g)")
+  override protected def withNewChildInternal(newChild: Expression): Expression =
+    copy(child = newChild)
+}
+
+case class StEndPoint(child: Expression)
+    extends UnaryExpression
+    with NullIntolerant
+    with CometGeoExpression {
+  override def foldable: Boolean = false
+  override def dataType: DataType = BinaryType
+  override def nullSafeEval(g: Any): Any =
+    CometGeoFallback.endPoint(g.asInstanceOf[Array[Byte]])
+  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
+    defineCodeGen(
+      ctx,
+      ev,
+      g => s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$.endPoint((byte[]) $g)")
+  override protected def withNewChildInternal(newChild: Expression): Expression =
+    copy(child = newChild)
+}
+
+case class StExteriorRing(child: Expression)
+    extends UnaryExpression
+    with NullIntolerant
+    with CometGeoExpression {
+  override def foldable: Boolean = false
+  override def dataType: DataType = BinaryType
+  override def nullSafeEval(g: Any): Any =
+    CometGeoFallback.exteriorRing(g.asInstanceOf[Array[Byte]])
+  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
+    defineCodeGen(
+      ctx,
+      ev,
+      g =>
+        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$.exteriorRing((byte[]) $g)")
+  override protected def withNewChildInternal(newChild: Expression): Expression =
+    copy(child = newChild)
+}
+
+case class StNumInteriorRings(child: Expression)
+    extends UnaryExpression
+    with NullIntolerant
+    with CometGeoExpression {
+  override def foldable: Boolean = false
+  override def dataType: DataType = IntegerType
+  override def nullSafeEval(g: Any): Any =
+    CometGeoFallback.numInteriorRings(g.asInstanceOf[Array[Byte]])
+  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
+    defineCodeGen(
+      ctx,
+      ev,
+      g =>
+        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$" +
+          s".numInteriorRings((byte[]) $g)")
+  override protected def withNewChildInternal(newChild: Expression): Expression =
+    copy(child = newChild)
+}
+
+case class StTranslate(geom: Expression, deltaX: Expression, deltaY: Expression)
+    extends Expression
+    with NullIntolerant
+    with CometGeoExpression {
+  override def foldable: Boolean = false
+  override def dataType: DataType = BinaryType
+  override def nullable: Boolean = true
+  override def children: Seq[Expression] = Seq(geom, deltaX, deltaY)
+  override def eval(input: InternalRow): Any = {
+    val g = geom.eval(input)
+    val dx = deltaX.eval(input)
+    val dy = deltaY.eval(input)
+    if (g == null || dx == null || dy == null) null
+    else
+      CometGeoFallback.translate(
+        g.asInstanceOf[Array[Byte]],
+        dx.asInstanceOf[Double],
+        dy.asInstanceOf[Double])
+  }
+  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode = ev
+  override protected def withNewChildrenInternal(
+      newChildren: IndexedSeq[Expression]): Expression =
+    copy(geom = newChildren(0), deltaX = newChildren(1), deltaY = newChildren(2))
+}
+
 // ---- Additional set operations -------------------------------------------
 
 case class StDifference(left: Expression, right: Expression)
@@ -977,4 +1179,43 @@ object GeoExpressions {
       "st_symdifference",
       classOf[StSymDifference],
       { args => StSymDifference(args(0), args(1)) })
+
+  val stGeomFromWkbInfo: FunctionDescription =
+    desc("st_geomfromwkb", classOf[StGeomFromWkb], { args => StGeomFromWkb(args(0)) })
+
+  val stAsBinaryInfo: FunctionDescription =
+    desc("st_asbinary", classOf[StAsBinary], { args => StAsBinary(args(0)) })
+
+  val stIsValidInfo: FunctionDescription =
+    desc("st_isvalid", classOf[StIsValid], { args => StIsValid(args(0)) })
+
+  val stSridInfo: FunctionDescription =
+    desc("st_srid", classOf[StSrid], { args => StSrid(args(0)) })
+
+  val stDimensionInfo: FunctionDescription =
+    desc("st_dimension", classOf[StDimension], { args => StDimension(args(0)) })
+
+  val stNumGeometriesInfo: FunctionDescription =
+    desc("st_numgeometries", classOf[StNumGeometries], { args => StNumGeometries(args(0)) })
+
+  val stStartPointInfo: FunctionDescription =
+    desc("st_startpoint", classOf[StStartPoint], { args => StStartPoint(args(0)) })
+
+  val stEndPointInfo: FunctionDescription =
+    desc("st_endpoint", classOf[StEndPoint], { args => StEndPoint(args(0)) })
+
+  val stExteriorRingInfo: FunctionDescription =
+    desc("st_exteriorring", classOf[StExteriorRing], { args => StExteriorRing(args(0)) })
+
+  val stNumInteriorRingsInfo: FunctionDescription =
+    desc(
+      "st_numinteriorrings",
+      classOf[StNumInteriorRings],
+      { args => StNumInteriorRings(args(0)) })
+
+  val stTranslateInfo: FunctionDescription =
+    desc(
+      "st_translate",
+      classOf[StTranslate],
+      { args => StTranslate(args(0), args(1), args(2)) })
 }

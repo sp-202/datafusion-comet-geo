@@ -17,6 +17,7 @@
 
 pub mod wkb_util;
 mod st_area;
+mod st_as_binary;
 mod st_as_geojson;
 mod st_as_text;
 mod st_boundary;
@@ -28,30 +29,38 @@ mod st_covered_by;
 mod st_covers;
 mod st_crosses;
 mod st_difference;
+mod st_dimension;
 mod st_disjoint;
 mod st_distance;
 mod st_distance_sphere;
+mod st_endpoint;
 mod st_envelope;
 mod st_equals;
 mod st_flip_coordinates;
 mod st_geom_from_geojson;
+mod st_geom_from_wkb;
 mod st_geom_from_wkt;
 mod st_geometry_type;
 mod st_hausdorff_distance;
 mod st_intersection;
 mod st_intersects;
 mod st_is_empty;
+mod st_is_valid;
 mod st_length;
 mod st_make_envelope;
 mod st_make_line;
+mod st_num_geometries;
 mod st_num_points;
 mod st_overlaps;
 mod st_perimeter;
 mod st_point;
+mod st_rings;
 mod st_simplify;
 mod st_simplify_preserve_topology;
+mod st_srid;
 mod st_sym_difference;
 mod st_touches;
+mod st_translate;
 mod st_union;
 mod st_within;
 mod st_x;
@@ -66,6 +75,9 @@ pub fn register_geo_functions(ctx: &SessionContext) {
         st_geom_from_wkt::StGeomFromWkt::default(),
     ));
     ctx.register_udf(ScalarUDF::new_from_impl(
+        st_geom_from_wkb::StGeomFromWkb::default(),
+    ));
+    ctx.register_udf(ScalarUDF::new_from_impl(
         st_geom_from_geojson::StGeomFromGeoJson::default(),
     ));
     ctx.register_udf(ScalarUDF::new_from_impl(st_point::StPoint::default()));
@@ -77,6 +89,9 @@ pub fn register_geo_functions(ctx: &SessionContext) {
     ctx.register_udf(ScalarUDF::new_from_impl(st_as_text::StAsText::default()));
     ctx.register_udf(ScalarUDF::new_from_impl(
         st_as_geojson::StAsGeoJson::default(),
+    ));
+    ctx.register_udf(ScalarUDF::new_from_impl(
+        st_as_binary::StAsBinary::default(),
     ));
     // Predicates
     ctx.register_udf(ScalarUDF::new_from_impl(st_contains::StContains::default()));
@@ -134,12 +149,26 @@ pub fn register_geo_functions(ctx: &SessionContext) {
     ));
     // Accessors
     ctx.register_udf(ScalarUDF::new_from_impl(st_is_empty::StIsEmpty::default()));
+    ctx.register_udf(ScalarUDF::new_from_impl(st_is_valid::StIsValid::default()));
     ctx.register_udf(ScalarUDF::new_from_impl(
         st_geometry_type::StGeometryType::default(),
     ));
     ctx.register_udf(ScalarUDF::new_from_impl(
         st_num_points::StNumPoints::default(),
     ));
+    ctx.register_udf(ScalarUDF::new_from_impl(
+        st_num_geometries::StNumGeometries::default(),
+    ));
+    ctx.register_udf(ScalarUDF::new_from_impl(st_dimension::StDimension::default()));
+    ctx.register_udf(ScalarUDF::new_from_impl(st_srid::StSrid::default()));
     ctx.register_udf(ScalarUDF::new_from_impl(st_x::StX::default()));
     ctx.register_udf(ScalarUDF::new_from_impl(st_y::StY::default()));
+    ctx.register_udf(ScalarUDF::new_from_impl(st_endpoint::StStartPoint::default()));
+    ctx.register_udf(ScalarUDF::new_from_impl(st_endpoint::StEndPoint::default()));
+    ctx.register_udf(ScalarUDF::new_from_impl(st_rings::StExteriorRing::default()));
+    ctx.register_udf(ScalarUDF::new_from_impl(
+        st_rings::StNumInteriorRings::default(),
+    ));
+    // Transformations (additional)
+    ctx.register_udf(ScalarUDF::new_from_impl(st_translate::StTranslate::default()));
 }

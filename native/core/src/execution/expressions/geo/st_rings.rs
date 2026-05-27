@@ -1,0 +1,123 @@
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+use std::any::Any;
+use std::sync::Arc;
+
+use arrow::array::{ArrayRef, BinaryBuilder, Int32Array};
+use arrow::datatypes::DataType;
+use datafusion::common::Result as DataFusionResult;
+use datafusion::logical_expr::{
+    ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, TypeSignature, Volatility,
+};
+use geo_types::{Geometry, LineString};
+
+use super::wkb_util::{as_binary_array, geom_to_wkb, read_wkb, wkb_to_geo};
+
+fn binary_sig() -> Signature {
+    Signature::one_of(
+        vec![
+            TypeSignature::Exact(vec![DataType::Binary]),
+            TypeSignature::Exact(vec![DataType::LargeBinary]),
+            TypeSignature::Exact(vec![DataType::BinaryView]),
+        ],
+        Volatility::Immutable,
+    )
+}
+
+/// ST_ExteriorRing — returns the exterior ring of a Polygon as a LineString.
+#[derive(Debug, Hash, Eq, PartialEq)]
+pub struct StExteriorRing {
+    signature: Signature,
+}
+
+impl Default for StExteriorRing {
+    fn default() -> Self { Self { signature: binary_sig() } }
+}
+
+impl ScalarUDFImpl for StExteriorRing {
+    fn as_any(&self) -> &dyn Any { self }
+    fn name(&self) -> &str { "st_exteriorring" }
+    fn signature(&self) -> &Signature { &self.signature }
+    fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> { Ok(DataType::Binary) }
+
+    fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
+        let arrays = ColumnarValue::values_to_arrays(&args.args)?;
+        let col = as_binary_array(&arrays[0])?;
+
+        let mut builder = BinaryBuilder::with_capacity(col.len(), col.len() * 64);
+        for bytes in col.iter() {
+            match bytes {
+                Some(b) => {
+                    let result = (|| -> Option<Vec<u8>> {
+                        let g = wkb_to_geo(read_wkb(b).ok()?).ok()?;
+                        let poly = match g {
+                            Geometry::Polygon(p) => p,
+                            _ => return None,
+                        };
+                        let ring: LineString = poly.exterior().clone();
+                        geom_to_wkb(&Geometry::LineString(ring)).ok()
+                    })();
+                    match result {
+                        Some(wkb) => builder.append_value(&wkb),
+                        None => builder.append_null(),
+                    }
+                }
+                None => builder.append_null(),
+            }
+        }
+
+        Ok(ColumnarValue::Array(Arc::new(builder.finish()) as ArrayRef))
+    }
+}
+
+/// ST_NumInteriorRings — returns the number of interior rings (holes) of a Polygon.
+#[derive(Debug, Hash, Eq, PartialEq)]
+pub struct StNumInteriorRings {
+    signature: Signature,
+}
+
+impl Default for StNumInteriorRings {
+    fn default() -> Self { Self { signature: binary_sig() } }
+}
+
+impl ScalarUDFImpl for StNumInteriorRings {
+    fn as_any(&self) -> &dyn Any { self }
+    fn name(&self) -> &str { "st_numinteriorrings" }
+    fn signature(&self) -> &Signature { &self.signature }
+    fn return_type(&self, _: &[DataType]) -> DataFusionResult<DataType> { Ok(DataType::Int32) }
+
+    fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
+        let arrays = ColumnarValue::values_to_arrays(&args.args)?;
+        let col = as_binary_array(&arrays[0])?;
+
+        let result: Int32Array = col
+            .iter()
+            .map(|b| {
+                b.and_then(|bytes| {
+                    let g = wkb_to_geo(read_wkb(bytes).ok()?).ok()?;
+                    match g {
+                        Geometry::Polygon(p) => Some(p.interiors().len() as i32),
+                        _ => None,
+                    }
+                })
+            })
+            .collect();
+
+        Ok(ColumnarValue::Array(Arc::new(result) as ArrayRef))
+    }
+}

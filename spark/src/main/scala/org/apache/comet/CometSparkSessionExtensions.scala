@@ -128,6 +128,17 @@ class CometSparkSessionExtensions
     extensions.injectFunction(GeoExpressions.stBoundaryInfo)
     extensions.injectFunction(GeoExpressions.stDifferenceInfo)
     extensions.injectFunction(GeoExpressions.stSymDifferenceInfo)
+    extensions.injectFunction(GeoExpressions.stGeomFromWkbInfo)
+    extensions.injectFunction(GeoExpressions.stAsBinaryInfo)
+    extensions.injectFunction(GeoExpressions.stIsValidInfo)
+    extensions.injectFunction(GeoExpressions.stSridInfo)
+    extensions.injectFunction(GeoExpressions.stDimensionInfo)
+    extensions.injectFunction(GeoExpressions.stNumGeometriesInfo)
+    extensions.injectFunction(GeoExpressions.stStartPointInfo)
+    extensions.injectFunction(GeoExpressions.stEndPointInfo)
+    extensions.injectFunction(GeoExpressions.stExteriorRingInfo)
+    extensions.injectFunction(GeoExpressions.stNumInteriorRingsInfo)
+    extensions.injectFunction(GeoExpressions.stTranslateInfo)
     extensions.injectOptimizerRule { session => CometGeoPreAggregateRule(session) }
     extensions.injectColumnar { session => CometScanColumnar(session) }
     extensions.injectColumnar { session => CometExecColumnar(session) }

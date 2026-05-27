@@ -23,7 +23,7 @@ import scala.util.Try
 
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 
-import org.apache.comet.expressions.{StArea, StAsGeoJson, StAsText, StBoundary, StBuffer, StCentroid, StContains, StConvexHull, StCoveredBy, StCovers, StCrosses, StDifference, StDisjoint, StDistance, StDistanceSphere, StEnvelope, StEquals, StFlipCoordinates, StGeometryType, StGeomFromGeoJson, StGeomFromWkt, StHausdorffDistance, StIntersection, StIntersects, StIsEmpty, StLength, StMakeEnvelope, StMakeLine, StNumPoints, StOverlaps, StPerimeter, StPoint, StSimplify, StSimplifyPreserveTopology, StSymDifference, StTouches, StUnion, StWithin, StX, StY}
+import org.apache.comet.expressions.{StArea, StAsBinary, StAsGeoJson, StAsText, StBoundary, StBuffer, StCentroid, StContains, StConvexHull, StCoveredBy, StCovers, StCrosses, StDifference, StDimension, StDisjoint, StDistance, StDistanceSphere, StEndPoint, StEnvelope, StEquals, StExteriorRing, StFlipCoordinates, StGeomFromGeoJson, StGeomFromWkb, StGeomFromWkt, StGeometryType, StHausdorffDistance, StIntersection, StIntersects, StIsEmpty, StIsValid, StLength, StMakeEnvelope, StMakeLine, StNumGeometries, StNumInteriorRings, StNumPoints, StOverlaps, StPerimeter, StPoint, StSimplify, StSimplifyPreserveTopology, StSrid, StStartPoint, StSymDifference, StTouches, StTranslate, StUnion, StWithin, StX, StY}
 import org.apache.comet.serde.ExprOuterClass.Expr
 import org.apache.comet.serde.QueryPlanSerde.{exprToProtoInternal, optExprWithInfo, scalarFunctionExprToProto}
 
@@ -77,7 +77,18 @@ private[serde] object CometGeoExpr {
       classOf[StFlipCoordinates] -> new CometGeoScalarFunc("st_flipcoordinates"),
       classOf[StBoundary] -> new CometGeoScalarFunc("st_boundary"),
       classOf[StDifference] -> new CometGeoScalarFunc("st_difference"),
-      classOf[StSymDifference] -> new CometGeoScalarFunc("st_symdifference"))
+      classOf[StSymDifference] -> new CometGeoScalarFunc("st_symdifference"),
+      classOf[StGeomFromWkb] -> new CometGeoScalarFunc("st_geomfromwkb"),
+      classOf[StAsBinary] -> new CometGeoScalarFunc("st_asbinary"),
+      classOf[StIsValid] -> new CometGeoScalarFunc("st_isvalid"),
+      classOf[StSrid] -> new CometGeoScalarFunc("st_srid"),
+      classOf[StDimension] -> new CometGeoScalarFunc("st_dimension"),
+      classOf[StNumGeometries] -> new CometGeoScalarFunc("st_numgeometries"),
+      classOf[StStartPoint] -> new CometGeoScalarFunc("st_startpoint"),
+      classOf[StEndPoint] -> new CometGeoScalarFunc("st_endpoint"),
+      classOf[StExteriorRing] -> new CometGeoScalarFunc("st_exteriorring"),
+      classOf[StNumInteriorRings] -> new CometGeoScalarFunc("st_numinteriorrings"),
+      classOf[StTranslate] -> new CometGeoScalarFunc("st_translate"))
 
     val sedonaEntries: Map[Class[_ <: Expression], CometExpressionSerde[_]] = Seq(
       "org.apache.sedona.sql.utils.expressions.ST_Contains" -> "st_contains",
