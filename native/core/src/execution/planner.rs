@@ -2797,16 +2797,18 @@ impl PhysicalPlanner {
     }
 
     /// Find DataFusion's built-in window function by name.
+    /// Try udwf first so dedicated window implementations (e.g. nth_value) are
+    /// preferred over aggregate UDAFs of the same name which may have limitations.
     fn find_df_window_function(&self, name: &str) -> Option<WindowFunctionDefinition> {
         let registry = &self.session_ctx.state();
         registry
-            .udaf(name)
-            .map(WindowFunctionDefinition::AggregateUDF)
+            .udwf(name)
+            .map(WindowFunctionDefinition::WindowUDF)
             .ok()
             .or_else(|| {
                 registry
-                    .udwf(name)
-                    .map(WindowFunctionDefinition::WindowUDF)
+                    .udaf(name)
+                    .map(WindowFunctionDefinition::AggregateUDF)
                     .ok()
             })
     }
