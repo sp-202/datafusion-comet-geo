@@ -1947,11 +1947,57 @@ impl PhysicalPlanner {
                     InputOrderMode::Sorted,
                     !partition_exprs.is_empty(),
                 )?);
-                Ok((
-                    scans,
-                    shuffle_scans,
-                    Arc::new(SparkPlan::new(spark_plan.plan_id, window_agg, vec![child])),
-                ))
+
+                // DataFusion ranking functions (row_number, rank, dense_rank, etc.) produce
+                // UInt64 output, but Spark expects Int64 (LongType). Insert a projection to
+                // cast any UInt64 window output columns to Int64.
+                let window_schema = window_agg.schema();
+                let needs_cast = window_schema
+                    .fields()
+                    .iter()
+                    .any(|f| f.data_type() == &DataType::UInt64);
+
+                if needs_cast {
+                    let cast_exprs: Result<Vec<(Arc<dyn PhysicalExpr>, String)>, _> = window_schema
+                        .fields()
+                        .iter()
+                        .enumerate()
+                        .map(|(i, f)| {
+                            let col: Arc<dyn PhysicalExpr> =
+                                Arc::new(datafusion::physical_expr::expressions::Column::new(
+                                    f.name(),
+                                    i,
+                                ));
+                            let expr: Arc<dyn PhysicalExpr> =
+                                if f.data_type() == &DataType::UInt64 {
+                                    Arc::new(CastExpr::new(col, DataType::Int64, None))
+                                } else {
+                                    col
+                                };
+                            Ok((expr, f.name().clone()))
+                        })
+                        .collect();
+                    let projection = Arc::new(
+                        ProjectionExec::try_new(cast_exprs?, Arc::clone(&window_agg) as _)
+                            .map_err(|e| ExecutionError::DataFusionError(e.to_string()))?,
+                    );
+                    Ok((
+                        scans,
+                        shuffle_scans,
+                        Arc::new(SparkPlan::new_with_additional(
+                            spark_plan.plan_id,
+                            projection,
+                            vec![child],
+                            vec![window_agg],
+                        )),
+                    ))
+                } else {
+                    Ok((
+                        scans,
+                        shuffle_scans,
+                        Arc::new(SparkPlan::new(spark_plan.plan_id, window_agg, vec![child])),
+                    ))
+                }
             }
             OpStruct::ShuffleScan(scan) => {
                 let data_types = scan.fields.iter().map(to_arrow_datatype).collect_vec();
