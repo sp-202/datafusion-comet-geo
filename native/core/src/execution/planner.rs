@@ -2779,6 +2779,10 @@ impl PhysicalPlanner {
                 };
                 Ok(("sum".to_string(), vec![child]))
             }
+            Some(AggExprStruct::Avg(expr)) => {
+                let child = self.create_expr(expr.child.as_ref().unwrap(), Arc::clone(&schema))?;
+                Ok(("avg".to_string(), vec![child]))
+            }
             other => Err(GeneralError(format!(
                 "{other:?} not supported for window function"
             ))),
