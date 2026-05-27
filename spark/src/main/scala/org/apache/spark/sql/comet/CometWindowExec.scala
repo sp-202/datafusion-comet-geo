@@ -32,11 +32,11 @@ import org.apache.spark.sql.catalyst.expressions.{
   Lag,
   Lead,
   NamedExpression,
-  NTile,
   NthValue,
+  NTile,
   PercentRank,
-  Rank,
   RangeFrame,
+  Rank,
   RowFrame,
   RowNumber,
   SortOrder,
@@ -57,7 +57,7 @@ import com.google.common.base.Objects
 
 import org.apache.comet.{CometConf, ConfigEntry}
 import org.apache.comet.CometSparkSessionExtensions.withInfo
-import org.apache.comet.serde.{AggSerde, Compatible, CometOperatorSerde, OperatorOuterClass, SupportLevel}
+import org.apache.comet.serde.{AggSerde, CometOperatorSerde, Compatible, OperatorOuterClass, SupportLevel}
 import org.apache.comet.serde.OperatorOuterClass.Operator
 import org.apache.comet.serde.QueryPlanSerde.{aggExprToProto, exprToProto, scalarFunctionExprToProto}
 
