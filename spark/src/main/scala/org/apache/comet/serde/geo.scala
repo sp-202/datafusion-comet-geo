@@ -23,7 +23,7 @@ import scala.util.Try
 
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 
-import org.apache.comet.expressions.{StArea, StAsBinary, StAsGeoJson, StAsText, StBoundary, StBuffer, StCentroid, StContains, StConvexHull, StCoveredBy, StCovers, StCrosses, StDifference, StDimension, StDisjoint, StDistance, StDistanceSphere, StEndPoint, StEnvelope, StEquals, StExteriorRing, StFlipCoordinates, StGeomFromGeoJson, StGeomFromWkb, StGeomFromWkt, StGeometryType, StHausdorffDistance, StIntersection, StIntersects, StIsEmpty, StIsValid, StLength, StMakeEnvelope, StMakeLine, StNumGeometries, StNumInteriorRings, StNumPoints, StOverlaps, StPerimeter, StPoint, StSimplify, StSimplifyPreserveTopology, StSrid, StStartPoint, StSymDifference, StTouches, StTranslate, StUnion, StWithin, StX, StY}
+import org.apache.comet.expressions.{StArea, StAsBinary, StAsGeoJson, StAsText, StBoundary, StBuffer, StCentroid, StContains, StConvexHull, StCoveredBy, StCovers, StCrosses, StDifference, StDimension, StDisjoint, StDistance, StDistanceSphere, StEndPoint, StEnvelope, StEquals, StExteriorRing, StFlipCoordinates, StGeometryType, StGeomFromGeoJson, StGeomFromWkb, StGeomFromWkt, StHausdorffDistance, StIntersection, StIntersects, StIsEmpty, StIsValid, StLength, StMakeEnvelope, StMakeLine, StNumGeometries, StNumInteriorRings, StNumPoints, StOverlaps, StPerimeter, StPoint, StSimplify, StSimplifyPreserveTopology, StSrid, StStartPoint, StSymDifference, StTouches, StTranslate, StUnion, StWithin, StX, StY}
 import org.apache.comet.serde.ExprOuterClass.Expr
 import org.apache.comet.serde.QueryPlanSerde.{exprToProtoInternal, optExprWithInfo, scalarFunctionExprToProto}
 

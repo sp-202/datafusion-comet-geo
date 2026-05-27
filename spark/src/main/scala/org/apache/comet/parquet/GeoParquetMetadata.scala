@@ -21,13 +21,12 @@ package org.apache.comet.parquet
 
 import scala.util.Try
 
-import org.json4s._
-import org.json4s.jackson.JsonMethods._
-
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
 import org.apache.parquet.hadoop.ParquetFileReader
 import org.apache.parquet.hadoop.util.HadoopInputFile
+import org.json4s._
+import org.json4s.jackson.JsonMethods._
 
 /**
  * Parsed representation of one geometry column from GeoParquet "geo" metadata.
@@ -57,7 +56,9 @@ case class GeoParquetMetadata(
 
   /** Returns the names of all WKB-encoded geometry columns (lowercase). */
   def wkbColumnNames: Set[String] =
-    columns.collect { case (name, info) if info.encoding.toUpperCase == "WKB" => name }.toSet
+    columns.collect {
+      case (name, info) if info.encoding.toUpperCase(java.util.Locale.ROOT) == "WKB" => name
+    }.toSet
 }
 
 object GeoParquetMetadata {
@@ -139,7 +140,8 @@ object GeoParquetMetadata {
               case JNothing | JNull => None
               case node => Some(compact(render(node)))
             }
-            colName.toLowerCase -> GeoColumnInfo(encoding, geomTypes, bbox, crs)
+            val lowerName = colName.toLowerCase(java.util.Locale.ROOT)
+            lowerName -> GeoColumnInfo(encoding, geomTypes, bbox, crs)
           }.toMap
         case _ => Map.empty
       }

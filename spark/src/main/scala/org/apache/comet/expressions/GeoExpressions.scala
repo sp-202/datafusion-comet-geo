@@ -392,7 +392,7 @@ case class StBuffer(left: Expression, right: Expression)
 
 // ---- Constructors --------------------------------------------------------
 
-// StGeomFromWkb takes Binary (WKB) and returns Binary (WKB) — validates and normalises
+// StGeomFromWkb takes Binary (WKB) and returns Binary (WKB) (validates and normalises)
 case class StGeomFromWkb(child: Expression)
     extends UnaryExpression
     with NullIntolerant
@@ -977,12 +977,14 @@ case class StTranslate(geom: Expression, deltaX: Expression, deltaY: Expression)
     val g = geom.eval(input)
     val dx = deltaX.eval(input)
     val dy = deltaY.eval(input)
-    if (g == null || dx == null || dy == null) null
-    else
+    if (g == null || dx == null || dy == null) {
+      null
+    } else {
       CometGeoFallback.translate(
         g.asInstanceOf[Array[Byte]],
         dx.asInstanceOf[Double],
         dy.asInstanceOf[Double])
+    }
   }
   override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode = ev
   override protected def withNewChildrenInternal(

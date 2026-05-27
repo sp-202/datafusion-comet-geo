@@ -20,9 +20,7 @@
 package org.apache.comet.parquet
 
 import org.apache.hadoop.fs.Path
-
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.types._
 
 /**
  * Utilities for reading GeoParquet file metadata from user code.

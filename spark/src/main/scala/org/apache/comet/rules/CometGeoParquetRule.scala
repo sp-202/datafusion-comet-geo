@@ -25,7 +25,6 @@ import scala.util.Try
 
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
-
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.{Alias, NamedExpression}
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, Project}
@@ -64,7 +63,8 @@ case class CometGeoParquetRule(session: SparkSession) extends Rule[LogicalPlan] 
         lr
       } else {
         val newProjectList: Seq[NamedExpression] = output.map { attr =>
-          if (wkbCols.contains(attr.name.toLowerCase) && attr.dataType == BinaryType) {
+          if (wkbCols.contains(attr.name.toLowerCase(java.util.Locale.ROOT)) &&
+              attr.dataType == BinaryType) {
             // Alias keeps the original column name so downstream SQL is unaffected.
             Alias(StGeomFromWkb(attr), attr.name)(attr.exprId, attr.qualifier)
           } else {
