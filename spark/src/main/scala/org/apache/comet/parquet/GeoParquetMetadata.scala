@@ -21,12 +21,13 @@ package org.apache.comet.parquet
 
 import scala.util.Try
 
+import org.json4s._
+import org.json4s.jackson.JsonMethods._
+
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
 import org.apache.parquet.hadoop.ParquetFileReader
 import org.apache.parquet.hadoop.util.HadoopInputFile
-import org.json4s._
-import org.json4s.jackson.JsonMethods._
 
 /**
  * Parsed representation of one geometry column from GeoParquet "geo" metadata.
