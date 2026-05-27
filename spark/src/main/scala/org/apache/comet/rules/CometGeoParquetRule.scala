@@ -51,9 +51,14 @@ case class CometGeoParquetRule(session: SparkSession) extends Rule[LogicalPlan] 
   private val footerCache: ConcurrentHashMap[String, Set[String]] =
     new ConcurrentHashMap[String, Set[String]]()
 
+  // Tracks relation output exprId sets already wrapped to make the rule idempotent.
+  private val wrappedRelations: java.util.Set[Int] =
+    java.util.Collections.newSetFromMap(new ConcurrentHashMap[Int, java.lang.Boolean]())
+
   override def apply(plan: LogicalPlan): LogicalPlan = plan.transformUp {
     case lr @ LogicalRelation(r: HadoopFsRelation, output, _, _)
-        if r.fileFormat.isInstanceOf[ParquetFileFormat] =>
+        if r.fileFormat.isInstanceOf[ParquetFileFormat] &&
+          !wrappedRelations.contains(System.identityHashCode(lr)) =>
       val wkbCols = detectWkbColumns(r)
       if (wkbCols.isEmpty) {
         lr
@@ -66,12 +71,13 @@ case class CometGeoParquetRule(session: SparkSession) extends Rule[LogicalPlan] 
             attr
           }
         }
-        if (newProjectList == output) lr
-        else Project(newProjectList, lr)
+        if (newProjectList == output) {
+          lr
+        } else {
+          wrappedRelations.add(System.identityHashCode(lr))
+          Project(newProjectList, lr)
+        }
       }
-
-    // Skip re-processing a Project we already injected to prevent infinite optimizer loops.
-    case p @ Project(_, LogicalRelation(_: HadoopFsRelation, _, _, _)) => p
   }
 
   private def detectWkbColumns(r: HadoopFsRelation): Set[String] = {
