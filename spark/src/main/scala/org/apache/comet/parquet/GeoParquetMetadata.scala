@@ -74,8 +74,8 @@ object GeoParquetMetadata {
   implicit val formats: DefaultFormats.type = DefaultFormats
 
   /**
-   * Reads the Parquet footer of the given file path and parses the "geo" metadata key.
-   * Returns None if the file is not a GeoParquet file or on any IO / parse error.
+   * Reads the Parquet footer of the given file path and parses the "geo" metadata key. Returns
+   * None if the file is not a GeoParquet file or on any IO / parse error.
    */
   def read(path: Path, hadoopConf: Configuration): Option[GeoParquetMetadata] = {
     Try {
@@ -92,8 +92,8 @@ object GeoParquetMetadata {
   }
 
   /**
-   * Returns the raw "geo" JSON string from the given Parquet file footer, or None if absent or
-   * on any error. Used by st_geoparquet_metadata() to expose the full blob to users.
+   * Returns the raw "geo" JSON string from the given Parquet file footer, or None if absent or on
+   * any error. Used by st_geoparquet_metadata() to expose the full blob to users.
    */
   def readRawJson(path: Path, hadoopConf: Configuration): Option[String] = {
     Try {
