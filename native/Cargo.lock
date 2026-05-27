@@ -481,9 +481,9 @@ dependencies = [
 
 [[package]]
 name = "assertables"
-version = "9.9.0"
+version = "10.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "627b0b35c347252505ec6c078827dfcecc4e9dcfa931c54c54066f9245ac752b"
+checksum = "4b3cadd448c7cd878da49dac40adcd0f7248d2911afe5102267f68c352d87882"
 dependencies = [
  "regex",
  "walkdir",
