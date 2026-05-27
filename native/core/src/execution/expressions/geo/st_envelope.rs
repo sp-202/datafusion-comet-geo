@@ -23,7 +23,7 @@ use arrow::datatypes::DataType;
 use datafusion::common::Result as DataFusionResult;
 use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, TypeSignature, Volatility};
 use geo::BoundingRect;
-use geo_types::Geometry;
+use geo_types::{Geometry, Polygon, LineString, Coord};
 
 use super::wkb_util::{geom_to_wkb, read_wkb, wkb_to_geo, as_binary_array};
 
@@ -64,7 +64,19 @@ impl ScalarUDFImpl for StEnvelope {
                     let result = (|| -> Option<Vec<u8>> {
                         let g = wkb_to_geo(read_wkb(bytes).ok()?).ok()?;
                         let r = g.bounding_rect()?;
-                        geom_to_wkb(&Geometry::Rect(r)).ok()
+                        // Convert Rect to Polygon — Geometry::Rect does not
+                        // serialize correctly with the wkb crate's writer.
+                        let poly = Polygon::new(
+                            LineString::from(vec![
+                                Coord { x: r.min().x, y: r.min().y },
+                                Coord { x: r.max().x, y: r.min().y },
+                                Coord { x: r.max().x, y: r.max().y },
+                                Coord { x: r.min().x, y: r.max().y },
+                                Coord { x: r.min().x, y: r.min().y },
+                            ]),
+                            vec![],
+                        );
+                        geom_to_wkb(&Geometry::Polygon(poly)).ok()
                     })();
                     match result {
                         Some(wkb) => builder.append_value(&wkb),
