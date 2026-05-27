@@ -265,12 +265,7 @@ class CometWindowExecSuite extends CometTestBase {
         SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> aqeEnabled) {
         withParquetTable((0 until 10).map(i => (i, 10 - i)), "t1") { // TODO: test nulls
           val aggregateFunctions =
-            List(
-              "COUNT(_1)",
-              "COUNT(*)",
-              "MAX(_1)",
-              "MIN(_1)",
-              "SUM(_1)")
+            List("COUNT(_1)", "COUNT(*)", "MAX(_1)", "MIN(_1)", "SUM(_1)")
 
           aggregateFunctions.foreach { function =>
             val queries = Seq(

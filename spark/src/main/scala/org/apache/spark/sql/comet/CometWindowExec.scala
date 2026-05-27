@@ -21,30 +21,7 @@ package org.apache.spark.sql.comet
 
 import scala.jdk.CollectionConverters._
 
-import org.apache.spark.sql.catalyst.expressions.{
-  Alias,
-  Attribute,
-  AttributeSet,
-  CumeDist,
-  CurrentRow,
-  DenseRank,
-  Expression,
-  Lag,
-  Lead,
-  NamedExpression,
-  NthValue,
-  NTile,
-  PercentRank,
-  RangeFrame,
-  Rank,
-  RowFrame,
-  RowNumber,
-  SortOrder,
-  SpecifiedWindowFrame,
-  UnboundedFollowing,
-  UnboundedPreceding,
-  WindowExpression
-}
+import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, AttributeSet, CumeDist, CurrentRow, DenseRank, Expression, Lag, Lead, NamedExpression, NthValue, NTile, PercentRank, RangeFrame, Rank, RowFrame, RowNumber, SortOrder, SpecifiedWindowFrame, UnboundedFollowing, UnboundedPreceding, WindowExpression}
 import org.apache.spark.sql.catalyst.expressions.aggregate.{AggregateExpression, Complete, Count, Max, Min, Sum}
 import org.apache.spark.sql.catalyst.plans.physical.Partitioning
 import org.apache.spark.sql.execution.SparkPlan
