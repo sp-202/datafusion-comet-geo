@@ -40,7 +40,7 @@ use datafusion::functions_aggregate::min_max::max_udaf;
 use datafusion::functions_aggregate::min_max::min_udaf;
 use datafusion::functions_aggregate::sum::sum_udaf;
 use datafusion::physical_expr::aggregate::{AggregateExprBuilder, AggregateFunctionExpr};
-use datafusion::physical_plan::windows::BoundedWindowAggExec;
+use datafusion::physical_plan::windows::{BoundedWindowAggExec, WindowAggExec};
 use datafusion::physical_plan::InputOrderMode;
 use datafusion::{
     arrow::{compute::SortOptions, datatypes::SchemaRef},
@@ -1943,12 +1943,34 @@ impl PhysicalPlanner {
 
                 let window_exprs_proto = &wnd.window_expr;
                 let window_expr_vec = window_expr?;
-                let window_agg = Arc::new(BoundedWindowAggExec::try_new(
-                    window_expr_vec,
-                    Arc::clone(&child.native_plan),
-                    InputOrderMode::Sorted,
-                    !partition_exprs.is_empty(),
-                )?);
+
+                // PERCENT_RANK, CUME_DIST, NTILE need the full partition before computing
+                // (supports_bounded_execution() = false). Use WindowAggExec for those;
+                // BoundedWindowAggExec (streaming) for everything else.
+                let needs_full_partition = window_expr_vec
+                    .iter()
+                    .any(|e| !e.uses_bounded_memory());
+
+                let window_agg: Arc<dyn ExecutionPlan> = if needs_full_partition {
+                    Arc::new(
+                        WindowAggExec::try_new(
+                            window_expr_vec,
+                            Arc::clone(&child.native_plan),
+                            !partition_exprs.is_empty(),
+                        )
+                        .map_err(|e| ExecutionError::DataFusionError(e.to_string()))?,
+                    )
+                } else {
+                    Arc::new(
+                        BoundedWindowAggExec::try_new(
+                            window_expr_vec,
+                            Arc::clone(&child.native_plan),
+                            InputOrderMode::Sorted,
+                            !partition_exprs.is_empty(),
+                        )
+                        .map_err(|e| ExecutionError::DataFusionError(e.to_string()))?,
+                    )
+                };
 
                 // DataFusion ranking functions (row_number, rank, dense_rank, ntile, etc.)
                 // produce unsigned integer output (UInt64), but Spark expects signed types
