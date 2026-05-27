@@ -65,7 +65,6 @@ case class CometGeoParquetRule(session: SparkSession) extends Rule[LogicalPlan] 
         val newProjectList: Seq[NamedExpression] = output.map { attr =>
           if (wkbCols.contains(attr.name.toLowerCase(java.util.Locale.ROOT)) &&
             attr.dataType == BinaryType) {
-            // Alias keeps the original column name so downstream SQL is unaffected.
             Alias(StGeomFromWkb(attr), attr.name)(attr.exprId, attr.qualifier)
           } else {
             attr
@@ -74,6 +73,9 @@ case class CometGeoParquetRule(session: SparkSession) extends Rule[LogicalPlan] 
         if (newProjectList == output) lr
         else Project(newProjectList, lr)
       }
+
+    // Skip re-processing a Project we already injected to prevent infinite optimizer loops.
+    case p @ Project(_, LogicalRelation(_: HadoopFsRelation, _, _, _)) => p
   }
 
   private def detectWkbColumns(r: HadoopFsRelation): Set[String] = {
