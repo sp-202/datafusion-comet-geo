@@ -19,9 +19,9 @@
 
 package org.apache.comet.parquet
 
-import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
+import org.apache.spark.util.SerializableConfiguration
 
 /**
  * Utilities for reading GeoParquet file metadata from user code.
@@ -78,19 +78,17 @@ object GeoParquetFunctions {
    * names in the file, or an empty array if none / not a GeoParquet file.
    */
   def registerAll(spark: SparkSession): Unit = {
-    // Capture hadoopConf on the driver; SparkSession cannot be used inside UDF closures
-    // because it is not serializable and its sessionState is null on executors.
-    val hadoopConf: Configuration = spark.sessionState.newHadoopConf()
+    val serConf = new SerializableConfiguration(spark.sessionState.newHadoopConf())
 
     spark.udf.register(
       "st_geoparquet_metadata",
-      (path: String) => GeoParquetMetadata.readRawJson(new Path(path), hadoopConf).orNull)
+      (path: String) => GeoParquetMetadata.readRawJson(new Path(path), serConf.value).orNull)
 
     spark.udf.register(
       "st_geoparquet_columns",
       (path: String) =>
         GeoParquetMetadata
-          .read(new Path(path), hadoopConf)
+          .read(new Path(path), serConf.value)
           .map(_.wkbColumnNames.toArray.sorted)
           .getOrElse(Array.empty[String]))
   }
