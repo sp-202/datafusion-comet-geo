@@ -21,13 +21,8 @@ package org.apache.comet.rules
 
 import scala.util.Try
 
-import org.json4s._
-import org.json4s.jackson.JsonMethods._
-
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
-import org.apache.parquet.hadoop.ParquetFileReader
-import org.apache.parquet.hadoop.util.HadoopInputFile
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.{Alias, NamedExpression}
@@ -38,6 +33,7 @@ import org.apache.spark.sql.execution.datasources.parquet.ParquetFileFormat
 import org.apache.spark.sql.types.BinaryType
 
 import org.apache.comet.expressions.StGeomFromWkb
+import org.apache.comet.parquet.{GeoParquetFunctions, GeoParquetMetadata}
 
 /**
  * Optimizer rule that detects GeoParquet files and automatically wraps WKB-encoded geometry
@@ -54,7 +50,8 @@ import org.apache.comet.expressions.StGeomFromWkb
  */
 case class CometGeoParquetRule(session: SparkSession) extends Rule[LogicalPlan] {
 
-  implicit val formats: DefaultFormats.type = DefaultFormats
+  // Register st_geoparquet_metadata / st_geoparquet_columns as Spark SQL UDFs once per session.
+  GeoParquetFunctions.registerAll(session)
 
   override def apply(plan: LogicalPlan): LogicalPlan = plan.transformUp {
     case lr @ LogicalRelation(r: HadoopFsRelation, output, _, _)
@@ -63,8 +60,6 @@ case class CometGeoParquetRule(session: SparkSession) extends Rule[LogicalPlan] 
       if (wkbCols.isEmpty) {
         lr
       } else {
-        // Build a Project that wraps each geometry column with StGeomFromWkb.
-        // Non-geometry columns pass through as-is.
         val newProjectList: Seq[NamedExpression] = output.map { attr =>
           if (wkbCols.contains(attr.name.toLowerCase) && attr.dataType == BinaryType) {
             // Alias preserves the original column name so downstream SQL is unaffected.
@@ -79,71 +74,20 @@ case class CometGeoParquetRule(session: SparkSession) extends Rule[LogicalPlan] 
       }
   }
 
-  /**
-   * Reads the Parquet footer of the first available file in the relation and extracts the set of
-   * column names whose GeoParquet encoding is "WKB". Returns empty set on any error.
-   */
   private def detectWkbColumns(r: HadoopFsRelation): Set[String] = {
     Try {
       val hadoopConf: Configuration =
         r.sparkSession.sessionState.newHadoopConfWithOptions(r.options)
-
-      // Pick the first file from the relation. All files in a partition share the same schema
-      // and geo metadata.
       val firstFile: Option[Path] = Try {
         r.location.listFiles(Seq.empty, Seq.empty).flatMap(_.files).headOption.map { f =>
           new Path(f.getPath.toString)
         }
       }.getOrElse(None)
 
-      firstFile match {
-        case None => Set.empty[String]
-        case Some(path) =>
-          val geoJson: Option[String] = Try {
-            val inputFile = HadoopInputFile.fromPath(path, hadoopConf)
-            val reader = ParquetFileReader.open(inputFile)
-            try {
-              val meta = reader.getFileMetaData.getKeyValueMetaData
-              Option(meta.get("geo"))
-            } finally {
-              reader.close()
-            }
-          }.getOrElse(None)
-
-          geoJson match {
-            case None => Set.empty[String]
-            case Some(json) => parseWkbColumns(json)
-          }
-      }
-    }.getOrElse(Set.empty[String])
-  }
-
-  /**
-   * Parses the GeoParquet "geo" JSON blob and returns the lowercase names of all columns whose
-   * encoding is "WKB" (case-insensitive). Returns empty set on any parse error.
-   *
-   * GeoParquet spec v1.1.0 "geo" metadata shape:
-   * {{{
-   *   {
-   *     "version": "1.1.0",
-   *     "columns": {
-   *       "geometry": { "encoding": "WKB", ... },
-   *       "other_col": { "encoding": "WKB", ... }
-   *     }
-   *   }
-   * }}}
-   */
-  private def parseWkbColumns(json: String): Set[String] = {
-    Try {
-      val root = parse(json)
-      val columns = (root \ "columns").asInstanceOf[JObject]
-      columns.obj.collect {
-        case (colName, colMeta) =>
-          val encoding = (colMeta \ "encoding").extractOpt[String].getOrElse("")
-          (colName.toLowerCase, encoding.toUpperCase)
-      }.collect {
-        case (colName, "WKB") => colName
-      }.toSet
+      firstFile
+        .flatMap(path => GeoParquetMetadata.read(path, hadoopConf))
+        .map(_.wkbColumnNames)
+        .getOrElse(Set.empty[String])
     }.getOrElse(Set.empty[String])
   }
 }
