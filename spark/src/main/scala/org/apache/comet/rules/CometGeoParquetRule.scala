@@ -34,7 +34,7 @@ import org.apache.spark.sql.execution.datasources.parquet.ParquetFileFormat
 import org.apache.spark.sql.types.BinaryType
 
 import org.apache.comet.expressions.StGeomFromWkb
-import org.apache.comet.parquet.{GeoParquetFunctions, GeoParquetMetadata}
+import org.apache.comet.parquet.GeoParquetMetadata
 
 /**
  * Optimizer rule that detects GeoParquet files and automatically wraps WKB-encoded geometry
@@ -45,10 +45,6 @@ import org.apache.comet.parquet.{GeoParquetFunctions, GeoParquetMetadata}
  * invocations on the same relation pay the IO cost only once.
  */
 case class CometGeoParquetRule(session: SparkSession) extends Rule[LogicalPlan] {
-
-  // Register st_geoparquet_metadata / st_geoparquet_columns as Spark SQL UDFs.
-  // injectOptimizerRule creates this rule once per session so this runs exactly once.
-  GeoParquetFunctions.registerAll(session)
 
   // Cache: path string -> set of WKB column names (empty = not a GeoParquet file).
   // Avoids reading the Parquet footer on every optimizer invocation for the same file.
