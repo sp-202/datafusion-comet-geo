@@ -298,9 +298,9 @@ object CometRound extends CometExpressionSerde[Round] {
     r.child.dataType match {
       case t: DecimalType if t.scale < 0 =>
         // Spark's type system rejects DecimalType with negative scale at analysis time
-        // (SPARK-30252), so this case is unreachable in practice. Kept as a safety net —
+        // (SPARK-30252), so this case is unreachable in practice. Kept as a safety net:
         // if somehow reached, fall back to JVM rather than produce wrong results.
-        withInfo(r, s"Decimal type ${t} has negative scale — unreachable via normal SQL")
+        withInfo(r, s"Decimal type ${t} has negative scale (unreachable via normal SQL)")
         None
       case _ if scaleV == null =>
         exprToProtoInternal(Literal(null), inputs, binding)
