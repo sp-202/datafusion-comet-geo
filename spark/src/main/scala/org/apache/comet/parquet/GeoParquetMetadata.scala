@@ -32,10 +32,14 @@ import org.apache.parquet.hadoop.util.HadoopInputFile
 /**
  * Parsed representation of one geometry column from GeoParquet "geo" metadata.
  *
- * @param encoding       always "WKB" for files we handle natively
- * @param geometryTypes  list of geometry type strings, e.g. ["Polygon", "MultiPolygon"]
- * @param bbox           optional bounding box [xmin, ymin, xmax, ymax]
- * @param crs            optional CRS as raw JSON string (PROJJSON object)
+ * @param encoding
+ *   always "WKB" for files we handle natively
+ * @param geometryTypes
+ *   list of geometry type strings, e.g. ["Polygon", "MultiPolygon"]
+ * @param bbox
+ *   optional bounding box [xmin, ymin, xmax, ymax]
+ * @param crs
+ *   optional CRS as raw JSON string (PROJJSON object)
  */
 case class GeoColumnInfo(
     encoding: String,
@@ -46,9 +50,12 @@ case class GeoColumnInfo(
 /**
  * Parsed "geo" metadata block from a GeoParquet file footer.
  *
- * @param version  GeoParquet spec version string, e.g. "1.1.0"
- * @param primary  name of the primary geometry column
- * @param columns  map from column name (lowercase) to its GeoColumnInfo
+ * @param version
+ *   GeoParquet spec version string, e.g. "1.1.0"
+ * @param primary
+ *   name of the primary geometry column
+ * @param columns
+ *   map from column name (lowercase) to its GeoColumnInfo
  */
 case class GeoParquetMetadata(
     version: String,

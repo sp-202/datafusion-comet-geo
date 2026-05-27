@@ -58,8 +58,8 @@ object GeoParquetFunctions {
   }
 
   /**
-   * Returns the raw "geo" JSON string from the Parquet file footer, or null if absent. Useful
-   * for inspecting the full GeoParquet metadata blob without parsing.
+   * Returns the raw "geo" JSON string from the Parquet file footer, or null if absent. Useful for
+   * inspecting the full GeoParquet metadata blob without parsing.
    */
   def readRawGeoJson(spark: SparkSession, filePath: String): Option[String] = {
     val hadoopConf = spark.sessionState.newHadoopConf()
@@ -69,14 +69,12 @@ object GeoParquetFunctions {
   /**
    * Registers two Spark SQL UDFs on the given session:
    *
-   *   st_geoparquet_metadata(path STRING) -> STRING
-   *     Returns the raw "geo" JSON string from the Parquet file footer at `path`,
-   *     or NULL if the file is not a GeoParquet file. The JSON contains version,
-   *     primary_column, and per-column info (encoding, geometry_types, bbox, crs).
+   * st_geoparquet_metadata(path STRING) -> STRING Returns the raw "geo" JSON string from the
+   * Parquet file footer at `path`, or NULL if not a GeoParquet file. The JSON contains version,
+   * primary_column, and per-column info (encoding, geometry_types, bbox, crs).
    *
-   *   st_geoparquet_columns(path STRING) -> ARRAY<STRING>
-   *     Returns the list of WKB-encoded geometry column names in the file, or an
-   *     empty array if none / not a GeoParquet file.
+   * st_geoparquet_columns(path STRING) -> ARRAY Returns the sorted list of WKB geometry column
+   * names in the file, or an empty array if none / not a GeoParquet file.
    */
   def registerAll(spark: SparkSession): Unit = {
     spark.udf.register(

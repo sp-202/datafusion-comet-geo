@@ -64,7 +64,7 @@ case class CometGeoParquetRule(session: SparkSession) extends Rule[LogicalPlan] 
       } else {
         val newProjectList: Seq[NamedExpression] = output.map { attr =>
           if (wkbCols.contains(attr.name.toLowerCase(java.util.Locale.ROOT)) &&
-              attr.dataType == BinaryType) {
+            attr.dataType == BinaryType) {
             // Alias keeps the original column name so downstream SQL is unaffected.
             Alias(StGeomFromWkb(attr), attr.name)(attr.exprId, attr.qualifier)
           } else {

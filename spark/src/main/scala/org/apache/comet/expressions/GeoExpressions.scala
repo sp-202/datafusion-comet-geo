@@ -940,8 +940,7 @@ case class StExteriorRing(child: Expression)
     defineCodeGen(
       ctx,
       ev,
-      g =>
-        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$.exteriorRing((byte[]) $g)")
+      g => s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$.exteriorRing((byte[]) $g)")
   override protected def withNewChildInternal(newChild: Expression): Expression =
     copy(child = newChild)
 }
@@ -1216,8 +1215,5 @@ object GeoExpressions {
       { args => StNumInteriorRings(args(0)) })
 
   val stTranslateInfo: FunctionDescription =
-    desc(
-      "st_translate",
-      classOf[StTranslate],
-      { args => StTranslate(args(0), args(1), args(2)) })
+    desc("st_translate", classOf[StTranslate], { args => StTranslate(args(0), args(1), args(2)) })
 }
