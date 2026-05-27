@@ -33,7 +33,7 @@ import org.apache.spark.sql.internal.SQLConf
 
 import org.apache.comet.CometConf._
 import org.apache.comet.expressions.GeoExpressions
-import org.apache.comet.rules.{CometExecRule, CometGeoPreAggregateRule, CometPlanAdaptiveDynamicPruningFilters, CometReuseSubquery, CometScanRule, CometSpark34AqeDppFallbackRule, EliminateRedundantTransitions}
+import org.apache.comet.rules.{CometExecRule, CometGeoParquetRule, CometGeoPreAggregateRule, CometPlanAdaptiveDynamicPruningFilters, CometReuseSubquery, CometScanRule, CometSpark34AqeDppFallbackRule, EliminateRedundantTransitions}
 import org.apache.comet.shims.ShimCometSparkSessionExtensions
 
 /**
@@ -139,6 +139,8 @@ class CometSparkSessionExtensions
     extensions.injectFunction(GeoExpressions.stExteriorRingInfo)
     extensions.injectFunction(GeoExpressions.stNumInteriorRingsInfo)
     extensions.injectFunction(GeoExpressions.stTranslateInfo)
+    // GeoParquet rule runs first so injected StGeomFromWkb calls are visible to the pre-agg rule.
+    extensions.injectOptimizerRule { session => CometGeoParquetRule(session) }
     extensions.injectOptimizerRule { session => CometGeoPreAggregateRule(session) }
     extensions.injectColumnar { session => CometScanColumnar(session) }
     extensions.injectColumnar { session => CometExecColumnar(session) }
