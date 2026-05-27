@@ -2781,6 +2781,13 @@ impl PhysicalPlanner {
             }
             Some(AggExprStruct::Avg(expr)) => {
                 let child = self.create_expr(expr.child.as_ref().unwrap(), Arc::clone(&schema))?;
+                let arrow_type = to_arrow_datatype(expr.datatype.as_ref().unwrap());
+                let datatype = child.data_type(&schema)?;
+                let child = if datatype != arrow_type {
+                    Arc::new(CastExpr::new(child, arrow_type, None))
+                } else {
+                    child
+                };
                 Ok(("avg".to_string(), vec![child]))
             }
             other => Err(GeneralError(format!(
