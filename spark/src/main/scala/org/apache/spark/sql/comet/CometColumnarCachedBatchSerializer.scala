@@ -176,7 +176,7 @@ class CometColumnarCachedBatchSerializer extends CachedBatchSerializer with Seri
   /**
    * Deserialize CachedBatch to InternalRow. Fallback path when columnar output is not requested
    * (e.g. non-Comet consumer). Decodes Arrow IPC bytes and iterates ColumnarBatch rows directly
-   * using ColumnarBatch.rowIterator() — avoids DefaultCachedBatchSerializer which does not
+   * using ColumnarBatch.rowIterator() to avoid DefaultCachedBatchSerializer which does not
    * support columnar input.
    */
   override def convertCachedBatchToInternalRow(
