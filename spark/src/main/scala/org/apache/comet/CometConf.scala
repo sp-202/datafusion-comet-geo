@@ -751,7 +751,8 @@ object CometConf extends ShimCometConf {
       .doc("Whether to register CometColumnarCachedBatchSerializer as the Spark cache " +
         "serializer (spark.sql.cache.serializer). When enabled, cached data is stored as " +
         "Arrow IPC bytes instead of UnsafeRow, so InMemoryTableScan produces ColumnarBatch " +
-        "directly and the Comet native chain is never broken at AQE cache boundaries.")
+        "directly and the Comet native chain is never broken at AQE cache boundaries. " +
+        "Class: org.apache.spark.sql.comet.CometColumnarCachedBatchSerializer")
       .booleanConf
       .createWithDefault(false)
 

@@ -17,7 +17,7 @@
  * under the License.
  */
 
-package org.apache.comet
+package org.apache.spark.sql.comet
 
 import java.io.Serializable
 import java.nio.ByteBuffer
@@ -33,6 +33,7 @@ import org.apache.spark.sql.vectorized.{ColumnarBatch, ColumnVector}
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.util.io.ChunkedByteBuffer
 
+import org.apache.comet.CometConf
 import org.apache.spark.sql.comet.execution.arrow.CometArrowConverters
 import org.apache.spark.sql.comet.util.Utils
 
@@ -103,7 +104,7 @@ class CometColumnarCachedBatchSerializer extends CachedBatchSerializer with Seri
     }
     input.mapPartitions { batches =>
       Utils.serializeBatches(batches).map { case (numRows, bytes) =>
-        ArrowCachedBatch(numRows, bytes.toArray)
+        ArrowCachedBatch(numRows.toInt, bytes.toArray)
       }
     }
   }
@@ -126,7 +127,7 @@ class CometColumnarCachedBatchSerializer extends CachedBatchSerializer with Seri
       val arrowIter = CometArrowConverters.rowToArrowBatchIter(
         rows, structSchema, batchSize, "UTC", null)
       Utils.serializeBatches(arrowIter).map { case (numRows, bytes) =>
-        ArrowCachedBatch(numRows, bytes.toArray)
+        ArrowCachedBatch(numRows.toInt, bytes.toArray)
       }
     }
   }
@@ -176,7 +177,9 @@ class CometColumnarCachedBatchSerializer extends CachedBatchSerializer with Seri
 
   /**
    * Deserialize CachedBatch to InternalRow.
-   * Fallback path when columnar output is not requested.
+   * Fallback path when columnar output is not requested (rare - Comet always uses columnar path).
+   * Re-serializes as UnsafeRow via the default Spark serializer so we don't need to implement
+   * Arrow→InternalRow conversion ourselves.
    */
   override def convertCachedBatchToInternalRow(
       input: RDD[CachedBatch],
@@ -187,17 +190,14 @@ class CometColumnarCachedBatchSerializer extends CachedBatchSerializer with Seri
       return fallback.convertCachedBatchToInternalRow(
         input, cacheAttributes, selectedAttributes, conf)
     }
+    // Convert Arrow IPC → ColumnarBatch → re-cache as UnsafeRow → read as InternalRow.
+    // This path is only hit when supportsColumnarOutput=false (e.g. non-Comet consumer).
     val columnar = convertCachedBatchToColumnarBatch(
       input, cacheAttributes, selectedAttributes, conf)
-    columnar.mapPartitions { batches =>
-      batches.flatMap { batch =>
-        val iter = batch.rowIterator()
-        new Iterator[InternalRow] {
-          override def hasNext: Boolean = iter.hasNext
-          override def next(): InternalRow = iter.next().copy()
-        }
-      }
-    }
+    val reEncoded = fallback.convertColumnarBatchToCachedBatch(
+      columnar, selectedAttributes, StorageLevel.MEMORY_ONLY, conf)
+    fallback.convertCachedBatchToInternalRow(
+      reEncoded, selectedAttributes, selectedAttributes, conf)
   }
 
   /**
@@ -216,6 +216,6 @@ class CometColumnarCachedBatchSerializer extends CachedBatchSerializer with Seri
  * Produced by CometColumnarCachedBatchSerializer and consumed by InMemoryTableScan
  * to produce ColumnarBatch directly without row conversion.
  */
-case class ArrowCachedBatch(numRows: Long, bytes: Array[Byte]) extends CachedBatch {
+case class ArrowCachedBatch(override val numRows: Int, bytes: Array[Byte]) extends CachedBatch {
   override def sizeInBytes: Long = bytes.length.toLong
 }
