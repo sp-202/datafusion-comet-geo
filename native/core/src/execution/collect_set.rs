@@ -143,6 +143,17 @@ impl<T: Accumulator> NullToEmptyListAccumulator<T> {
 
 impl<T: Accumulator> Accumulator for NullToEmptyListAccumulator<T> {
     fn update_batch(&mut self, values: &[ArrayRef]) -> Result<()> {
+        // In the Final/PartialMerge phase, GroupsAccumulatorAdapter calls update_batch
+        // with the partial-aggregate state column (type List<element_type>) instead of
+        // calling merge_batch. Detect this by checking whether the input array's type
+        // matches the state type (List<element_type>) and route to merge_batch.
+        if values.len() == 1 {
+            let list_state_type =
+                DataType::List(Arc::new(Field::new_list_field(self.element_type.clone(), true)));
+            if values[0].data_type() == &list_state_type {
+                return self.inner.merge_batch(values);
+            }
+        }
         self.inner.update_batch(values)
     }
 
