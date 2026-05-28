@@ -736,8 +736,20 @@ object CometCollectSet extends CometAggregateExpressionSerde[CollectSet] {
       inputs: Seq[Attribute],
       binding: Boolean,
       conf: SQLConf): Option[ExprOuterClass.AggExpr] = {
-    val child = expr.children.head
-    val childExpr = exprToProto(child, inputs, binding)
+    // In Final/PartialMerge mode (binding=false), the child expression still refers to the
+    // original input attribute (e.g. "val"), but the actual input schema contains the state
+    // buffer attribute (e.g. "buf"). We must bind to the state buffer by position instead.
+    // CollectSet.aggBufferAttributes gives us the state attribute; we find its index in inputs.
+    val child = if (!binding) {
+      val stateAttr = expr.aggBufferAttributes.head
+      inputs.indexWhere(_.exprId == stateAttr.exprId) match {
+        case idx if idx >= 0 => inputs(idx)
+        case _ => expr.children.head
+      }
+    } else {
+      expr.children.head
+    }
+    val childExpr = exprToProto(child, inputs, binding = true)
     val dataType = serializeDataType(expr.dataType)
 
     if (childExpr.isDefined && dataType.isDefined) {
