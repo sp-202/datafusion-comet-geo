@@ -758,7 +758,9 @@ object CometCollectSet extends CometAggregateExpressionSerde[CollectSet] {
     }
     // scalastyle:off println
     System.err.println(
-      s"[DEBUG CometCollectSet] binding=$binding inputs=[${inputs.map(a => a.name + ":" + a.dataType).mkString(", ")}] child=${child.name}:${child.dataType}")
+      s"[DEBUG CometCollectSet] binding=$binding inputs=[${inputs
+          .map(a => a.name + ":" + a.dataType)
+          .mkString(", ")}] child=$child:${child.dataType}")
     // scalastyle:on println
     val childExpr = exprToProto(child, resolvedInputs, binding = true)
     val dataType = serializeDataType(expr.dataType)
