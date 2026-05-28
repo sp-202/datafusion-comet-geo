@@ -253,10 +253,23 @@ object CometShuffleExchangeExec
           op,
           CometShuffleExchangeExec(op, shuffleType = CometColumnarShuffle))
       case Some(CometNativeShuffle) =>
-        // Native was chosen but children are not native - fall through to columnar if possible.
-        // This can happen when getSupportLevel selected native but a later pass changed the plan.
-        throw new IllegalStateException(
-          "shuffleSupported chose native shuffle but children are not all CometNativeExec")
+        // Native was chosen but children are not native — this happens during AQE reOptimize when
+        // a previously-native child (e.g. HashAggregateExec) falls back to JVM mid-planning.
+        // isCometPlan(child) returned true (child is a CometPlan wrapping a stage) but the direct
+        // child is not CometNativeExec. Re-evaluate: try columnar, otherwise leave as Spark.
+        val columnarReasons = columnarShuffleFailureReasons(op)
+        if (columnarReasons.isEmpty) {
+          CometSinkPlaceHolder(
+            nativeOp,
+            op,
+            CometShuffleExchangeExec(op, shuffleType = CometColumnarShuffle))
+        } else {
+          // Tag so future AQE passes short-circuit and we do not loop.
+          withInfos(op, (columnarReasons :+ "native shuffle fallback: child is not CometNativeExec").toSet)
+          throw new IllegalStateException(
+            s"AQE shuffle fallback: native child was not CometNativeExec and columnar is " +
+              s"unavailable (${columnarReasons.mkString(", ")})")
+        }
       case None =>
         throw new IllegalStateException()
     }
@@ -295,11 +308,14 @@ object CometShuffleExchangeExec
       return None
     }
 
-    // Native path is only eligible when the child is already a Comet plan; otherwise skip it
-    // silently (no reason to surface) and let columnar take over.
+    // Native path requires the DIRECT child to be CometNativeExec — not just any CometPlan.
+    // CometSinkPlaceHolder, AQEShuffleReadExec wrapping a Comet exchange, etc. are CometPlan
+    // but not CometNativeExec; choosing native shuffle for those leads to an assertion crash
+    // in createExec during AQE reOptimize (see #AQE-native-fallback).
+    val childIsNative = s.child.isInstanceOf[CometNativeExec]
     val nativeReasons: Seq[String] =
-      if (isCometPlan(s.child)) nativeShuffleFailureReasons(s) else Seq.empty
-    if (isCometPlan(s.child) && nativeReasons.isEmpty) {
+      if (childIsNative) nativeShuffleFailureReasons(s) else Seq.empty
+    if (childIsNative && nativeReasons.isEmpty) {
       return Some(CometNativeShuffle)
     }
 
