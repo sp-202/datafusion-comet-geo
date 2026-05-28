@@ -175,7 +175,9 @@ class CometColumnarCachedBatchSerializer extends CachedBatchSerializer with Seri
 
   /**
    * Deserialize CachedBatch to InternalRow. Fallback path when columnar output is not requested
-   * (e.g. non-Comet consumer). Re-serializes as UnsafeRow via the default Spark serializer.
+   * (e.g. non-Comet consumer). Decodes Arrow IPC bytes and iterates ColumnarBatch rows directly
+   * using ColumnarBatch.rowIterator() — avoids DefaultCachedBatchSerializer which does not
+   * support columnar input.
    */
   override def convertCachedBatchToInternalRow(
       input: RDD[CachedBatch],
@@ -189,18 +191,34 @@ class CometColumnarCachedBatchSerializer extends CachedBatchSerializer with Seri
         selectedAttributes,
         conf)
     }
-    val columnar =
-      convertCachedBatchToColumnarBatch(input, cacheAttributes, selectedAttributes, conf)
-    val reEncoded = fallback.convertColumnarBatchToCachedBatch(
-      columnar,
-      selectedAttributes,
-      StorageLevel.MEMORY_ONLY,
-      conf)
-    fallback.convertCachedBatchToInternalRow(
-      reEncoded,
-      selectedAttributes,
-      selectedAttributes,
-      conf)
+    val requestedIndices = selectedAttributes.map { a =>
+      cacheAttributes.indexWhere(_.exprId == a.exprId)
+    }
+    val needsPruning = cacheAttributes != selectedAttributes
+    input.mapPartitions { batches =>
+      batches.flatMap {
+        case ArrowCachedBatch(_, bytes) =>
+          val buf = new ChunkedByteBuffer(Array(ByteBuffer.wrap(bytes)))
+          val allBatches = Utils.decodeBatches(buf, "CometColumnarCachedBatchSerializer")
+          allBatches.flatMap { batch =>
+            val targetBatch = if (needsPruning) {
+              val cols = requestedIndices.map(i => batch.column(i)).toArray
+              new ColumnarBatch(cols.asInstanceOf[Array[ColumnVector]], batch.numRows())
+            } else {
+              batch
+            }
+            val rowIter = targetBatch.rowIterator()
+            new Iterator[InternalRow] {
+              override def hasNext: Boolean = rowIter.hasNext
+              override def next(): InternalRow = rowIter.next().copy()
+            }
+          }
+        case other =>
+          throw new IllegalArgumentException(
+            "CometColumnarCachedBatchSerializer: unexpected CachedBatch type: " +
+              other.getClass.getName)
+      }
+    }
   }
 
   /**
