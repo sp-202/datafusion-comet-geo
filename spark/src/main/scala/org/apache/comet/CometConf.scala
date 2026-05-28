@@ -748,11 +748,12 @@ object CometConf extends ShimCometConf {
   val COMET_COLUMNAR_CACHE_SERIALIZER_ENABLED: ConfigEntry[Boolean] =
     conf("spark.comet.columnarCacheSerialization.enabled")
       .category(CATEGORY_EXEC)
-      .doc("Whether to register CometColumnarCachedBatchSerializer as the Spark cache " +
-        "serializer (spark.sql.cache.serializer). When enabled, cached data is stored as " +
-        "Arrow IPC bytes instead of UnsafeRow, so InMemoryTableScan produces ColumnarBatch " +
-        "directly and the Comet native chain is never broken at AQE cache boundaries. " +
-        "Class: org.apache.spark.sql.comet.CometColumnarCachedBatchSerializer")
+      .doc(
+        "Whether to register CometColumnarCachedBatchSerializer as the Spark cache " +
+          "serializer (spark.sql.cache.serializer). When enabled, cached data is stored as " +
+          "Arrow IPC bytes instead of UnsafeRow, so InMemoryTableScan produces ColumnarBatch " +
+          "directly and the Comet native chain is never broken at AQE cache boundaries. " +
+          "Class: org.apache.spark.sql.comet.CometColumnarCachedBatchSerializer")
       .booleanConf
       .createWithDefault(false)
 
