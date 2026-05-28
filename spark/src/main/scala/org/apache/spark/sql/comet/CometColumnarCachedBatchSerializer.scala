@@ -119,12 +119,8 @@ class CometColumnarCachedBatchSerializer extends CachedBatchSerializer with Seri
     val batchSize = CometConf.COMET_BATCH_SIZE.get(conf)
     val structSchema = toStructType(schema)
     input.mapPartitions { rows =>
-      val arrowIter = CometArrowConverters.rowToArrowBatchIter(
-        rows,
-        structSchema,
-        batchSize,
-        "UTC",
-        null)
+      val arrowIter =
+        CometArrowConverters.rowToArrowBatchIter(rows, structSchema, batchSize, "UTC", null)
       Utils.serializeBatches(arrowIter).map { case (numRows, bytes) =>
         ArrowCachedBatch(numRows.toInt, bytes.toArray)
       }
@@ -193,11 +189,8 @@ class CometColumnarCachedBatchSerializer extends CachedBatchSerializer with Seri
         selectedAttributes,
         conf)
     }
-    val columnar = convertCachedBatchToColumnarBatch(
-      input,
-      cacheAttributes,
-      selectedAttributes,
-      conf)
+    val columnar =
+      convertCachedBatchToColumnarBatch(input, cacheAttributes, selectedAttributes, conf)
     val reEncoded = fallback.convertColumnarBatchToCachedBatch(
       columnar,
       selectedAttributes,
@@ -221,10 +214,10 @@ class CometColumnarCachedBatchSerializer extends CachedBatchSerializer with Seri
 }
 
 /**
- * A CachedBatch wrapping Arrow IPC serialized bytes. Produced by CometColumnarCachedBatchSerializer
- * and consumed by InMemoryTableScan to produce ColumnarBatch directly without row conversion.
+ * A CachedBatch wrapping Arrow IPC serialized bytes. Produced by
+ * CometColumnarCachedBatchSerializer and consumed by InMemoryTableScan to produce ColumnarBatch
+ * directly without row conversion.
  */
-case class ArrowCachedBatch(override val numRows: Int, bytes: Array[Byte])
-    extends CachedBatch {
+case class ArrowCachedBatch(override val numRows: Int, bytes: Array[Byte]) extends CachedBatch {
   override def sizeInBytes: Long = bytes.length.toLong
 }
