@@ -2565,7 +2565,7 @@ impl PhysicalPlanner {
             AggExprStruct::CollectSet(expr) => {
                 let child = self.create_expr(expr.child.as_ref().unwrap(), Arc::clone(&schema))?;
                 let func = AggregateUDF::new_from_impl(CometCollectSet::new());
-                Self::create_aggr_func_expr_distinct("collect_set", schema, vec![child], func)
+                Self::create_aggr_func_expr("collect_set", schema, vec![child], func)
             }
         }
     }
@@ -3073,22 +3073,6 @@ impl PhysicalPlanner {
             .map_err(|e| e.into())
     }
 
-    // collect_set is semantically distinct aggregation - must set is_distinct=true so
-    // AccumulatorArgs::is_distinct is true when accumulator() is called.
-    fn create_aggr_func_expr_distinct(
-        name: &str,
-        schema: SchemaRef,
-        children: Vec<Arc<dyn PhysicalExpr>>,
-        func: AggregateUDF,
-    ) -> Result<AggregateFunctionExpr, ExecutionError> {
-        AggregateExprBuilder::new(Arc::new(func), children)
-            .schema(schema)
-            .alias(name)
-            .with_ignore_nulls(false)
-            .with_distinct(true)
-            .build()
-            .map_err(|e| e.into())
-    }
 }
 
 /// Collects the indices of the columns in the input schema that are used in the expression

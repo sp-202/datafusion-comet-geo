@@ -15,39 +15,33 @@
 // specific language governing permissions and limitations
 // under the License.
 
-//! Comet-local implementation of collect_set that correctly handles both Partial
-//! and PartialMerge/Final aggregate modes.
+//! Comet-native collect_set backed by a proper GroupsAccumulator.
 //!
-//! The upstream datafusion-spark SparkCollectSet passes acc_args.expr_fields[0]
-//! directly to DistinctArrayAggAccumulator::try_new as the element type. In
-//! Partial mode this is fine (the input is the raw element, e.g. Utf8). But in
-//! PartialMerge/Final mode the input expression is the STATE column, which has
-//! type List<Utf8> - the outer list wrapping the partial aggregate's output. Using
-//! List<Utf8> as the element type makes the accumulator treat each state row as
-//! a nested list and panics in merge_batch with "list array" when it tries to
-//! as_list::<i32>() on a List<List<Utf8>> instead of List<Utf8>.
+//! Implements GroupsAccumulator directly so DataFusion never wraps us in
+//! GroupsAccumulatorAdapter. That adapter calls update_batch for both Partial
+//! and Final phases, which breaks DistinctArrayAggAccumulator because the Final
+//! phase passes List<T> state but update_batch expects raw T elements.
 //!
-//! Fix: unwrap one level of List when the input field is already a list type.
-//! This correctly recovers the element type for the PartialMerge path.
+//! With a real GroupsAccumulator the split is explicit:
+//!   update_batch = Partial phase, receives raw T values
+//!   merge_batch  = Final phase, receives List<T> state
 
-use arrow::array::ArrayRef;
+use arrow::array::{Array, ArrayRef, BooleanArray, ListArray, new_empty_array};
+use arrow::buffer::OffsetBuffer;
 use arrow::datatypes::{DataType, Field, FieldRef};
 use datafusion::common::utils::SingleRowListArrayBuilder;
 use datafusion::common::{Result, ScalarValue};
-use datafusion::functions_aggregate::array_agg::DistinctArrayAggAccumulator;
+use datafusion::logical_expr::EmitTo;
 use datafusion::logical_expr::function::{AccumulatorArgs, StateFieldsArgs};
 use datafusion::logical_expr::utils::format_state_name;
-use datafusion::logical_expr::{Accumulator, AggregateUDFImpl, Signature, Volatility};
+use datafusion::logical_expr::{Accumulator, AggregateUDFImpl, GroupsAccumulator, Signature, Volatility};
+use std::collections::HashSet;
 use std::{any::Any, sync::Arc};
 
-/// Comet's collect_set aggregate function.
-///
-/// Differences from DataFusion ArrayAgg with distinct:
+/// Comet's collect_set aggregate.
 /// - Ignores NULL inputs (Spark semantics).
-/// - Returns an empty list instead of NULL when all inputs are NULL.
-/// - Correctly handles both Partial and PartialMerge/Final modes by
-///   deriving the element type from the innermost list element, not the
-///   raw expr_fields type which changes between planning passes.
+/// - Returns empty list instead of NULL when all inputs are NULL.
+/// - Backed by a real GroupsAccumulator - no GroupsAccumulatorAdapter involved.
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct CometCollectSet {
     signature: Signature,
@@ -66,12 +60,10 @@ impl CometCollectSet {
         }
     }
 
-    /// Extract the true element type from the accumulator input field.
-    ///
-    /// In Partial mode:     expr_fields[0] has type T   (the raw input column).
-    /// In PartialMerge mode: expr_fields[0] has type List<T> (the state column).
-    ///
-    /// We always want T - so unwrap one List level if present.
+    /// Element type T from the input field.
+    /// Partial mode: expr_fields[0] is T.
+    /// PartialMerge/Final mode: expr_fields[0] is List<T> (the state column).
+    /// Always returns T.
     fn element_type(input_data_type: &DataType) -> DataType {
         match input_data_type {
             DataType::List(inner_field) => inner_field.data_type().clone(),
@@ -95,7 +87,6 @@ impl AggregateUDFImpl for CometCollectSet {
     }
 
     fn return_type(&self, arg_types: &[DataType]) -> Result<DataType> {
-        // arg_types[0] may be List<T> in PartialMerge - unwrap to get T.
         let element_type = Self::element_type(&arg_types[0]);
         Ok(DataType::List(Arc::new(Field::new_list_field(
             element_type,
@@ -113,69 +104,225 @@ impl AggregateUDFImpl for CometCollectSet {
         .into()])
     }
 
+    /// Scalar accumulator for the no-GROUP-BY case.
     fn accumulator(&self, acc_args: AccumulatorArgs) -> Result<Box<dyn Accumulator>> {
-        let input_type = acc_args.expr_fields[0].data_type().clone();
-        let element_type = Self::element_type(&input_type);
-        let ignore_nulls = true;
-        Ok(Box::new(NullToEmptyListAccumulator::new(
-            DistinctArrayAggAccumulator::try_new(&element_type, None, ignore_nulls)?,
-            element_type,
-        )))
+        let element_type = Self::element_type(acc_args.expr_fields[0].data_type());
+        Ok(Box::new(ScalarCollectSetAccumulator::new(element_type)))
+    }
+
+    /// Opt in to the GroupsAccumulator fast path.
+    /// This prevents DataFusion from wrapping us in GroupsAccumulatorAdapter.
+    fn groups_accumulator_supported(&self, _args: AccumulatorArgs) -> bool {
+        true
+    }
+
+    fn create_groups_accumulator(
+        &self,
+        args: AccumulatorArgs,
+    ) -> Result<Box<dyn GroupsAccumulator>> {
+        let element_type = Self::element_type(args.expr_fields[0].data_type());
+        Ok(Box::new(CollectSetGroupsAccumulator::new(element_type)))
     }
 }
 
-/// Wraps an inner Accumulator so that evaluate() returns an empty list
-/// instead of NULL when all inputs were NULL (Spark semantics).
+// ---------------------------------------------------------------------------
+// Scalar accumulator (no GROUP BY)
+// ---------------------------------------------------------------------------
+
 #[derive(Debug)]
-struct NullToEmptyListAccumulator<T: Accumulator> {
-    inner: T,
+struct ScalarCollectSetAccumulator {
+    values: HashSet<ScalarValue>,
     element_type: DataType,
 }
 
-impl<T: Accumulator> NullToEmptyListAccumulator<T> {
-    pub fn new(inner: T, element_type: DataType) -> Self {
+impl ScalarCollectSetAccumulator {
+    fn new(element_type: DataType) -> Self {
         Self {
-            inner,
+            values: HashSet::new(),
             element_type,
         }
     }
 }
 
-impl<T: Accumulator> Accumulator for NullToEmptyListAccumulator<T> {
+impl Accumulator for ScalarCollectSetAccumulator {
     fn update_batch(&mut self, values: &[ArrayRef]) -> Result<()> {
-        // In the Final/PartialMerge phase, GroupsAccumulatorAdapter calls update_batch
-        // with the partial-aggregate state column (type List<element_type>) instead of
-        // calling merge_batch. Detect this by checking whether the input array's type
-        // matches the state type (List<element_type>) and route to merge_batch.
-        if values.len() == 1 {
-            let list_state_type =
-                DataType::List(Arc::new(Field::new_list_field(self.element_type.clone(), true)));
-            if values[0].data_type() == &list_state_type {
-                return self.inner.merge_batch(values);
+        for i in 0..values[0].len() {
+            if values[0].is_valid(i) {
+                self.values.insert(ScalarValue::try_from_array(&values[0], i)?);
             }
         }
-        self.inner.update_batch(values)
+        Ok(())
     }
 
     fn merge_batch(&mut self, states: &[ArrayRef]) -> Result<()> {
-        self.inner.merge_batch(states)
+        let list = states[0]
+            .as_any()
+            .downcast_ref::<ListArray>()
+            .expect("collect_set merge state must be a ListArray");
+        for row in list.iter().flatten() {
+            for i in 0..row.len() {
+                if row.is_valid(i) {
+                    self.values.insert(ScalarValue::try_from_array(&row, i)?);
+                }
+            }
+        }
+        Ok(())
     }
 
     fn state(&mut self) -> Result<Vec<ScalarValue>> {
-        self.inner.state()
+        Ok(vec![self.evaluate()?])
     }
 
     fn evaluate(&mut self) -> Result<ScalarValue> {
-        let result = self.inner.evaluate()?;
-        if result.is_null() {
-            let empty_array = arrow::array::new_empty_array(&self.element_type);
-            Ok(SingleRowListArrayBuilder::new(empty_array).build_list_scalar())
-        } else {
-            Ok(result)
+        if self.values.is_empty() {
+            let empty = new_empty_array(&self.element_type);
+            return Ok(SingleRowListArrayBuilder::new(empty).build_list_scalar());
         }
+        let vals: Vec<ScalarValue> = self.values.iter().cloned().collect();
+        ScalarValue::new_list_nullable(&vals, &self.element_type)
     }
 
     fn size(&self) -> usize {
-        self.inner.size() + self.element_type.size()
+        self.values.iter().map(|v| v.size()).sum::<usize>() + self.element_type.size()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GroupsAccumulator (GROUP BY path) — one HashSet<ScalarValue> per group
+// ---------------------------------------------------------------------------
+
+#[derive(Debug)]
+struct CollectSetGroupsAccumulator {
+    /// Per-group distinct value sets.
+    groups: Vec<HashSet<ScalarValue>>,
+    element_type: DataType,
+}
+
+impl CollectSetGroupsAccumulator {
+    fn new(element_type: DataType) -> Self {
+        Self {
+            groups: Vec::new(),
+            element_type,
+        }
+    }
+
+    fn ensure_groups(&mut self, total: usize) {
+        while self.groups.len() < total {
+            self.groups.push(HashSet::new());
+        }
+    }
+
+    /// Build a ListArray from the first `n` groups, then drain them.
+    fn emit(&mut self, n: usize) -> Result<ArrayRef> {
+        let element_field = Arc::new(Field::new_list_field(self.element_type.clone(), true));
+
+        // Build flat values array and offsets.
+        let mut all_scalars: Vec<ScalarValue> = Vec::new();
+        let mut offsets: Vec<i32> = Vec::with_capacity(n + 1);
+        offsets.push(0);
+
+        for group in self.groups.iter().take(n) {
+            let start = all_scalars.len();
+            all_scalars.extend(group.iter().cloned());
+            offsets.push(all_scalars.len() as i32);
+        }
+
+        let flat_array = if all_scalars.is_empty() {
+            new_empty_array(&self.element_type)
+        } else {
+            ScalarValue::iter_to_array(all_scalars.into_iter())?
+        };
+
+        let list = ListArray::new(
+            element_field,
+            OffsetBuffer::new(offsets.into()),
+            flat_array,
+            None, // no nulls - Spark returns empty list, not NULL
+        );
+
+        Ok(Arc::new(list))
+    }
+}
+
+impl GroupsAccumulator for CollectSetGroupsAccumulator {
+    /// Partial phase: receives raw T values, one per row.
+    fn update_batch(
+        &mut self,
+        values: &[ArrayRef],
+        group_indices: &[usize],
+        opt_filter: Option<&BooleanArray>,
+        total_num_groups: usize,
+    ) -> Result<()> {
+        self.ensure_groups(total_num_groups);
+        let input = &values[0];
+
+        for (row_idx, &group_idx) in group_indices.iter().enumerate() {
+            if let Some(f) = opt_filter {
+                if f.is_null(row_idx) || !f.value(row_idx) {
+                    continue;
+                }
+            }
+            if input.is_null(row_idx) {
+                continue; // Spark collect_set ignores NULLs
+            }
+            let sv = ScalarValue::try_from_array(input, row_idx)?;
+            self.groups[group_idx].insert(sv);
+        }
+        Ok(())
+    }
+
+    /// Final/PartialMerge phase: receives List<T> state from partial agg.
+    fn merge_batch(
+        &mut self,
+        values: &[ArrayRef],
+        group_indices: &[usize],
+        _opt_filter: Option<&BooleanArray>,
+        total_num_groups: usize,
+    ) -> Result<()> {
+        self.ensure_groups(total_num_groups);
+        let list = values[0]
+            .as_any()
+            .downcast_ref::<ListArray>()
+            .expect("collect_set merge state must be ListArray<T>");
+
+        for (row_idx, &group_idx) in group_indices.iter().enumerate() {
+            if list.is_null(row_idx) {
+                continue;
+            }
+            let row = list.value(row_idx);
+            for i in 0..row.len() {
+                if row.is_valid(i) {
+                    let sv = ScalarValue::try_from_array(&row, i)?;
+                    self.groups[group_idx].insert(sv);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn evaluate(&mut self, emit_to: EmitTo) -> Result<ArrayRef> {
+        let n = match emit_to {
+            EmitTo::All => self.groups.len(),
+            EmitTo::First(n) => n,
+        };
+        let result = self.emit(n)?;
+        match emit_to {
+            EmitTo::All => self.groups.clear(),
+            EmitTo::First(n) => { self.groups.drain(0..n); }
+        }
+        Ok(result)
+    }
+
+    fn state(&mut self, emit_to: EmitTo) -> Result<Vec<ArrayRef>> {
+        // State is identical to evaluate output - ListArray of distinct values per group.
+        Ok(vec![self.evaluate(emit_to)?])
+    }
+
+    fn size(&self) -> usize {
+        self.groups
+            .iter()
+            .map(|g| g.iter().map(|v| v.size()).sum::<usize>())
+            .sum::<usize>()
+            + self.element_type.size()
     }
 }
