@@ -65,6 +65,7 @@ import org.apache.spark.shuffle.comet.CometShuffleMemoryAllocatorTrait;
 import org.apache.spark.shuffle.sort.CometShuffleExternalSorter;
 import org.apache.spark.shuffle.sort.SortShuffleManager;
 import org.apache.spark.shuffle.sort.UnsafeShuffleWriter;
+import org.apache.spark.sql.catalyst.expressions.UnsafeProjection;
 import org.apache.spark.sql.catalyst.expressions.UnsafeRow;
 import org.apache.spark.sql.execution.metric.SQLMetric;
 import org.apache.spark.sql.types.StructType;
@@ -130,6 +131,7 @@ public class CometUnsafeShuffleWriter<K, V> extends ShuffleWriter<K, V> {
   private Native nativeLib = new Native();
   private CometShuffleMemoryAllocatorTrait allocator;
   private boolean tracingEnabled;
+  @Nullable private UnsafeProjection unsafeProjection;
 
   /** SQLMetric for encode + compression time; null when not available. */
   @Nullable private final SQLMetric encodeTimeMetric;
@@ -178,6 +180,7 @@ public class CometUnsafeShuffleWriter<K, V> extends ShuffleWriter<K, V> {
     this.tracingEnabled = (boolean) CometConf.COMET_TRACING_ENABLED().get();
     this.encodeTimeMetric = encodeTimeMetric;
     open();
+    this.unsafeProjection = UnsafeProjection.create(schema);
   }
 
   private static OutputStream openStreamUnchecked(ShufflePartitionWriter writer) {
@@ -310,7 +313,12 @@ public class CometUnsafeShuffleWriter<K, V> extends ShuffleWriter<K, V> {
     final int partitionId = partitioner.getPartition(key);
     serBuffer.reset();
     serOutputStream.writeKey(key, OBJECT_CLASS_TAG);
-    serOutputStream.writeValue((UnsafeRow) record._2(), OBJECT_CLASS_TAG);
+    final Object value = record._2();
+    final UnsafeRow unsafeRow =
+        (value instanceof UnsafeRow)
+            ? (UnsafeRow) value
+            : unsafeProjection.apply((org.apache.spark.sql.catalyst.InternalRow) value);
+    serOutputStream.writeValue(unsafeRow, OBJECT_CLASS_TAG);
     serOutputStream.flush();
 
     final int serializedRecordSize = serBuffer.size();
