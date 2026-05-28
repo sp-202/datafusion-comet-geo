@@ -24,7 +24,7 @@ import scala.jdk.CollectionConverters._
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Literal}
 import org.apache.spark.sql.catalyst.expressions.aggregate.{AggregateExpression, Average, BitAndAgg, BitOrAgg, BitXorAgg, BloomFilterAggregate, CentralMomentAgg, CollectSet, Corr, Count, Covariance, CovPopulation, CovSample, First, Last, Max, Min, StddevPop, StddevSamp, Sum, VariancePop, VarianceSamp}
 import org.apache.spark.sql.internal.SQLConf
-import org.apache.spark.sql.types.{ByteType, DataTypes, DecimalType, IntegerType, LongType, ShortType, StringType}
+import org.apache.spark.sql.types.{ArrayType, ByteType, DataTypes, DecimalType, IntegerType, LongType, ShortType, StringType}
 
 import org.apache.comet.CometConf
 import org.apache.comet.CometConf.COMET_EXEC_STRICT_FLOATING_POINT
@@ -738,18 +738,25 @@ object CometCollectSet extends CometAggregateExpressionSerde[CollectSet] {
       conf: SQLConf): Option[ExprOuterClass.AggExpr] = {
     // In Final/PartialMerge mode (binding=false), the child expression still refers to the
     // original input attribute (e.g. "val"), but the actual input schema contains the state
-    // buffer attribute (e.g. "buf"). Find the state buffer column in inputs by name and bind
-    // to it directly so the Rust planner receives a BoundReference instead of UnboundColumn.
-    val child = if (!binding) {
+    // buffer attribute (e.g. "buf") with BinaryType (Spark's serialized shuffle type).
+    // Comet's native aggregate actually produces ArrayType(elementType) state, so we must
+    // find the buffer column by name and override its type to ArrayType before serializing,
+    // otherwise Rust receives a BoundReference typed as Binary and the ListArray downcast fails.
+    val (child, resolvedInputs) = if (!binding) {
+      val elementType = expr.children.head.dataType
+      val nativeStateType = ArrayType(elementType, containsNull = true)
       val stateName = expr.aggBufferAttributes.head.name
       inputs.indexWhere(_.name == stateName) match {
-        case idx if idx >= 0 => inputs(idx)
-        case _ => expr.children.head
+        case idx if idx >= 0 =>
+          val corrected = inputs(idx).withDataType(nativeStateType)
+          val patchedInputs = inputs.updated(idx, corrected)
+          (corrected, patchedInputs)
+        case _ => (expr.children.head, inputs)
       }
     } else {
-      expr.children.head
+      (expr.children.head, inputs)
     }
-    val childExpr = exprToProto(child, inputs, binding = true)
+    val childExpr = exprToProto(child, resolvedInputs, binding = true)
     val dataType = serializeDataType(expr.dataType)
 
     if (childExpr.isDefined && dataType.isDefined) {
