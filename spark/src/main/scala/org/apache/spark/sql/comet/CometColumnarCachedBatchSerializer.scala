@@ -26,6 +26,8 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.columnar.{CachedBatch, CachedBatchSerializer}
+import org.apache.spark.sql.comet.execution.arrow.CometArrowConverters
+import org.apache.spark.sql.comet.util.Utils
 import org.apache.spark.sql.execution.columnar.DefaultCachedBatchSerializer
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types._
@@ -34,34 +36,27 @@ import org.apache.spark.storage.StorageLevel
 import org.apache.spark.util.io.ChunkedByteBuffer
 
 import org.apache.comet.CometConf
-import org.apache.spark.sql.comet.execution.arrow.CometArrowConverters
-import org.apache.spark.sql.comet.util.Utils
 
 /**
  * Comet's implementation of Spark's CachedBatchSerializer.
  *
  * Stores cached data as Arrow IPC bytes (same format Comet already uses for shuffle and
- * broadcast). When InMemoryTableScan reads cached data it produces ColumnarBatch directly
- * - the Comet native chain is never broken at an AQE cache boundary.
+ * broadcast). When InMemoryTableScan reads cached data it produces ColumnarBatch directly,
+ * so the Comet native chain is never broken at an AQE cache boundary.
  *
  * Enable via:
- *   spark.sql.cache.serializer = org.apache.comet.CometColumnarCachedBatchSerializer
+ *   spark.sql.cache.serializer = org.apache.spark.sql.comet.CometColumnarCachedBatchSerializer
  *
  * Falls back to Spark's DefaultCachedBatchSerializer for schemas that Comet cannot handle
  * (e.g. complex nested types not supported by CometArrowConverters).
- *
- * Based on the same pattern as Gluten's ColumnarCachedBatchSerializer, adapted for
- * Comet's Arrow IPC serialization utilities.
  */
 class CometColumnarCachedBatchSerializer extends CachedBatchSerializer with Serializable {
 
-  // Fallback to Spark's default serializer for unsupported schemas.
   private lazy val fallback = new DefaultCachedBatchSerializer
 
   private def toStructType(schema: Seq[Attribute]): StructType =
     StructType(schema.map(a => StructField(a.name, a.dataType, a.nullable, a.metadata)))
 
-  // Schemas containing MapType are not supported by CometArrowConverters.
   private def isSupportedSchema(schema: Seq[Attribute]): Boolean =
     !schema.exists(a => containsMap(a.dataType))
 
@@ -76,16 +71,16 @@ class CometColumnarCachedBatchSerializer extends CachedBatchSerializer with Seri
   }
 
   /**
-   * Whether this serializer supports columnar input.
-   * true = Spark calls convertColumnarBatchToCachedBatch instead of convertInternalRowToCachedBatch.
+   * Whether this serializer supports columnar input. When true, Spark calls
+   * convertColumnarBatchToCachedBatch instead of convertInternalRowToCachedBatch.
    */
   override def supportsColumnarInput(schema: Seq[Attribute]): Boolean =
     isSupportedSchema(schema)
 
   /**
-   * Whether this serializer produces ColumnarBatch on read.
-   * true = InMemoryTableScan calls convertCachedBatchToColumnarBatch.
-   * This is the key: InMemoryTableScan returns Arrow ColumnarBatch directly, no R2C conversion.
+   * Whether this serializer produces ColumnarBatch on read. When true,
+   * InMemoryTableScan calls convertCachedBatchToColumnarBatch and returns Arrow
+   * ColumnarBatch directly with no row-to-columnar conversion overhead.
    */
   override def supportsColumnarOutput(schema: StructType): Boolean =
     isSupportedSchema(schema)
@@ -133,7 +128,7 @@ class CometColumnarCachedBatchSerializer extends CachedBatchSerializer with Seri
   }
 
   /**
-   * Deserialize CachedBatch to ColumnarBatch (Arrow IPC bytes → Arrow ColumnarBatch).
+   * Deserialize CachedBatch to ColumnarBatch (Arrow IPC bytes to Arrow ColumnarBatch).
    * Called by InMemoryTableScan when supportsColumnarOutput = true.
    * Zero-conversion path: Arrow bytes go directly into Comet native execution.
    *
@@ -162,24 +157,25 @@ class CometColumnarCachedBatchSerializer extends CachedBatchSerializer with Seri
           if (needsPruning) {
             allBatches.map { batch =>
               val cols = requestedIndices.map(i => batch.column(i)).toArray
-              new ColumnarBatch(cols.asInstanceOf[Array[ColumnVector]], batch.numRows())
+              new ColumnarBatch(
+                cols.asInstanceOf[Array[ColumnVector]],
+                batch.numRows())
             }
           } else {
             allBatches
           }
         case other =>
-          // Fallback: if a batch was cached by DefaultCachedBatchSerializer (schema changed), skip it.
           throw new IllegalArgumentException(
-            s"CometColumnarCachedBatchSerializer: unexpected CachedBatch type: ${other.getClass.getName}")
+            "CometColumnarCachedBatchSerializer: unexpected CachedBatch type: " +
+              other.getClass.getName)
       }
     }
   }
 
   /**
    * Deserialize CachedBatch to InternalRow.
-   * Fallback path when columnar output is not requested (rare - Comet always uses columnar path).
-   * Re-serializes as UnsafeRow via the default Spark serializer so we don't need to implement
-   * Arrow→InternalRow conversion ourselves.
+   * Fallback path when columnar output is not requested (e.g. non-Comet consumer).
+   * Re-serializes as UnsafeRow via the default Spark serializer.
    */
   override def convertCachedBatchToInternalRow(
       input: RDD[CachedBatch],
@@ -190,8 +186,6 @@ class CometColumnarCachedBatchSerializer extends CachedBatchSerializer with Seri
       return fallback.convertCachedBatchToInternalRow(
         input, cacheAttributes, selectedAttributes, conf)
     }
-    // Convert Arrow IPC → ColumnarBatch → re-cache as UnsafeRow → read as InternalRow.
-    // This path is only hit when supportsColumnarOutput=false (e.g. non-Comet consumer).
     val columnar = convertCachedBatchToColumnarBatch(
       input, cacheAttributes, selectedAttributes, conf)
     val reEncoded = fallback.convertColumnarBatchToCachedBatch(
@@ -202,8 +196,7 @@ class CometColumnarCachedBatchSerializer extends CachedBatchSerializer with Seri
 
   /**
    * Filter predicate for pre-filtering cached batches before decompression.
-   * We pass all batches through since Arrow IPC does not embed per-column statistics.
-   * Gluten does this too for unsupported stats; we always use the pass-through path.
+   * Arrow IPC does not embed per-column statistics so all batches pass through.
    */
   override def buildFilter(
       predicates: Seq[Expression],
@@ -216,6 +209,7 @@ class CometColumnarCachedBatchSerializer extends CachedBatchSerializer with Seri
  * Produced by CometColumnarCachedBatchSerializer and consumed by InMemoryTableScan
  * to produce ColumnarBatch directly without row conversion.
  */
-case class ArrowCachedBatch(override val numRows: Int, bytes: Array[Byte]) extends CachedBatch {
+case class ArrowCachedBatch(override val numRows: Int, bytes: Array[Byte])
+    extends CachedBatch {
   override def sizeInBytes: Long = bytes.length.toLong
 }
