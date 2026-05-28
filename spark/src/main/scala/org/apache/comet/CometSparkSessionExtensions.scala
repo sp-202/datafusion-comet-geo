@@ -34,7 +34,7 @@ import org.apache.spark.sql.internal.SQLConf
 import org.apache.comet.CometConf._
 import org.apache.comet.expressions.GeoExpressions
 import org.apache.comet.parquet.GeoParquetFunctions
-import org.apache.comet.rules.{CometExecRule, CometGeoParquetRule, CometGeoPreAggregateRule, CometPlanAdaptiveDynamicPruningFilters, CometReuseSubquery, CometScanRule, CometSpark34AqeDppFallbackRule, EliminateRedundantTransitions}
+import org.apache.comet.rules.{CometColumnarRule, CometExecRule, CometGeoParquetRule, CometGeoPreAggregateRule, CometPlanAdaptiveDynamicPruningFilters, CometReuseSubquery, CometScanRule, CometSpark34AqeDppFallbackRule, EliminateRedundantTransitions}
 import org.apache.comet.shims.ShimCometSparkSessionExtensions
 
 /**
@@ -168,8 +168,13 @@ class CometSparkSessionExtensions
   case class CometExecColumnar(session: SparkSession) extends ColumnarRule {
     override def preColumnarTransitions: Rule[SparkPlan] = CometExecRule(session)
 
-    override def postColumnarTransitions: Rule[SparkPlan] =
-      EliminateRedundantTransitions(session)
+    override def postColumnarTransitions: Rule[SparkPlan] = new Rule[SparkPlan] {
+      override val ruleName: String = "CometPostColumnarTransitions"
+      override def apply(plan: SparkPlan): SparkPlan = {
+        val planWithCometTransitions = CometColumnarRule(session).apply(plan)
+        EliminateRedundantTransitions(session).apply(planWithCometTransitions)
+      }
+    }
   }
 
 }

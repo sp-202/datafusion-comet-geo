@@ -354,9 +354,30 @@ case class CometExecRule(session: SparkSession)
         convertToComet(s, CometShuffleExchangeExec).getOrElse(s)
 
       case op =>
-        // if all children are native (or if this is a leaf node) then see if there is a
-        // registered handler for creating a fully native plan
-        if (op.children.forall(_.isInstanceOf[CometNativeExec])) {
+        // Determine if this operator's children can safely be wrapped in a RowToColumnarExec
+        // transition if they are not already CometNativeExec.
+        val safeToConvert = op.children.forall {
+          case _: CometNativeExec => true
+          case child =>
+            val isSafeNode = child match {
+              // These operators cannot be wrapped in RowToColumnarExec because they don't produce
+              // normal rows or have special handling that would be broken by R2C.
+              case _: BroadcastExchangeExec | _: BroadcastQueryStageExec | _: ReusedExchangeExec |
+                   _: ShuffleQueryStageExec | _: AQEShuffleReadExec | _: WriteFilesExec |
+                   _: DataWritingCommandExec => false
+              // Cannot wrap Unsafe Partial Aggregates (would crash on Final aggregate buffer mismatch)
+              case c if c.getTagValue(CometExecRule.COMET_UNSAFE_PARTIAL).isDefined => false
+              // Cannot wrap Reverted Columnar Shuffles (Spark shuffle doesn't understand Arrow format)
+              case c if c.getTagValue(CometExecRule.SKIP_COMET_SHUFFLE_TAG).isDefined => false
+              case _ => true
+            }
+            // Ensure the child's schema is supported by CometSparkToColumnarExec
+            isSafeNode && CometSparkToColumnarExec.isSchemaSupported(child.schema, new scala.collection.mutable.ListBuffer[String]())
+        }
+
+        // if all children are native or can be safely wrapped in a transition, see if there is a
+        // registered handler for creating a native plan
+        if (safeToConvert) {
           val handler = allExecs
             .get(op.getClass)
             .map(_.asInstanceOf[CometOperatorSerde[SparkPlan]])
@@ -380,9 +401,8 @@ case class CometExecRule(session: SparkSession)
             // 2. The operator could not be supported based on query context and current
             //    configs. In this case, it should have already been tagged with fallback
             //    reasons.
-            // 3. The operator has children that could not be converted, so execution
-            //    has already fallen back to Spark.
-            if (op.children.forall(_.isInstanceOf[CometNativeExec]) && !hasExplainInfo(op)) {
+            // 3. The operator has children that could not be converted and cannot be wrapped.
+            if (safeToConvert && !hasExplainInfo(op)) {
               withInfo(op, s"${op.nodeName} is not supported")
             } else {
               op
