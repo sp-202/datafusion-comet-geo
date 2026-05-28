@@ -179,7 +179,7 @@ impl Accumulator for ScalarCollectSetAccumulator {
             return Ok(SingleRowListArrayBuilder::new(empty).build_list_scalar());
         }
         let vals: Vec<ScalarValue> = self.values.iter().cloned().collect();
-        ScalarValue::new_list_nullable(&vals, &self.element_type)
+        Ok(ScalarValue::List(ScalarValue::new_list_nullable(&vals, &self.element_type)))
     }
 
     fn size(&self) -> usize {
@@ -222,7 +222,6 @@ impl CollectSetGroupsAccumulator {
         offsets.push(0);
 
         for group in self.groups.iter().take(n) {
-            let start = all_scalars.len();
             all_scalars.extend(group.iter().cloned());
             offsets.push(all_scalars.len() as i32);
         }
