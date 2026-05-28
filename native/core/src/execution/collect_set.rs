@@ -282,7 +282,11 @@ impl GroupsAccumulator for CollectSetGroupsAccumulator {
         let list = values[0]
             .as_any()
             .downcast_ref::<ListArray>()
-            .expect("collect_set merge state must be ListArray<T>");
+            .ok_or_else(|| datafusion::common::DataFusionError::Internal(format!(
+                "collect_set merge_batch: expected ListArray but got {:?} (data_type={:?})",
+                values[0].as_any().type_id(),
+                values[0].data_type()
+            )))?;
 
         for (row_idx, &group_idx) in group_indices.iter().enumerate() {
             if list.is_null(row_idx) {
