@@ -738,11 +738,11 @@ object CometCollectSet extends CometAggregateExpressionSerde[CollectSet] {
       conf: SQLConf): Option[ExprOuterClass.AggExpr] = {
     // In Final/PartialMerge mode (binding=false), the child expression still refers to the
     // original input attribute (e.g. "val"), but the actual input schema contains the state
-    // buffer attribute (e.g. "buf"). We must bind to the state buffer by position instead.
-    // CollectSet.aggBufferAttributes gives us the state attribute; we find its index in inputs.
+    // buffer attribute (e.g. "buf"). Find the state buffer column in inputs by name and bind
+    // to it directly so the Rust planner receives a BoundReference instead of UnboundColumn.
     val child = if (!binding) {
-      val stateAttr = expr.aggBufferAttributes.head
-      inputs.indexWhere(_.exprId == stateAttr.exprId) match {
+      val stateName = expr.aggBufferAttributes.head.name
+      inputs.indexWhere(_.name == stateName) match {
         case idx if idx >= 0 => inputs(idx)
         case _ => expr.children.head
       }
