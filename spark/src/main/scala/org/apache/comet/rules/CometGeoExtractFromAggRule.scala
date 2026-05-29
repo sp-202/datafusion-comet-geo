@@ -49,7 +49,7 @@ case class CometGeoExtractFromAggRule(session: SparkSession) extends Rule[SparkP
 object CometGeoExtractFromAggRule {
 
   def hasGeoInResults(agg: HashAggregateExec): Boolean =
-    agg.resultExpressions.exists(e => containsGeo(unwrapAlias(e)))
+    agg.resultExpressions.exists(e => containsGeoExpr(unwrapAlias(e)))
 
   /**
    * Split resultExpressions into plain and geo-carrying. Returns:
@@ -63,7 +63,7 @@ object CometGeoExtractFromAggRule {
    */
   def stripGeoFromResults(agg: HashAggregateExec): (HashAggregateExec, Seq[NamedExpression]) = {
     val (geoExprs, plainExprs) =
-      agg.resultExpressions.partition(e => containsGeo(unwrapAlias(e)))
+      agg.resultExpressions.partition(e => containsGeoExpr(unwrapAlias(e)))
 
     val strippedAgg = agg.copy(resultExpressions = plainExprs)
 
@@ -92,6 +92,6 @@ object CometGeoExtractFromAggRule {
     case other => other
   }
 
-  private def containsGeo(expr: Expression): Boolean =
-    expr.isInstanceOf[CometGeoExpression] || expr.children.exists(containsGeo)
+  def containsGeoExpr(expr: Expression): Boolean =
+    expr.isInstanceOf[CometGeoExpression] || expr.children.exists(containsGeoExpr)
 }

@@ -22,7 +22,7 @@ package org.apache.comet.rules
 import scala.collection.mutable.ListBuffer
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.expressions.{Divide, DoubleLiteral, EqualNullSafe, EqualTo, Expression, FloatLiteral, GreaterThan, GreaterThanOrEqual, KnownFloatingPointNormalized, LessThan, LessThanOrEqual, NamedExpression, Remainder}
+import org.apache.spark.sql.catalyst.expressions.{Alias, Divide, DoubleLiteral, EqualNullSafe, EqualTo, Expression, FloatLiteral, GreaterThan, GreaterThanOrEqual, KnownFloatingPointNormalized, LessThan, LessThanOrEqual, Literal, NamedExpression, Remainder}
 import org.apache.spark.sql.catalyst.expressions.aggregate.{AggregateMode, Final, Partial}
 import org.apache.spark.sql.catalyst.optimizer.NormalizeNaNAndZero
 import org.apache.spark.sql.catalyst.rules.Rule
@@ -702,8 +702,12 @@ case class CometExecRule(session: SparkSession)
         // If a Final HashAggregateExec has geo expressions in resultExpressions, strip them
         // before serde (geo cannot be serialized against aggregateAttributes), convert the
         // stripped aggregate natively, then build a CometProjectExec above it that re-applies
-        // the geo exprs. The geo exprs reference the stripped agg's final output attributes,
-        // which are available in cometAgg.output, so exprToProto can serialize them natively.
+        // the geo exprs bound against the stripped agg's output attributes.
+        //
+        // If native conversion fails (e.g. sparkFinalMode=true because the Partial ran as JVM,
+        // or show() wraps results in toprettystring), we fall back to a safe JVM path: replace
+        // each geo result expression with a typed null literal so the JVM aggregate can run
+        // without calling st_point.eval() -> CometGeoFallback.notSupported().
         op match {
           case agg: HashAggregateExec if CometGeoExtractFromAggRule.hasGeoInResults(agg) =>
             val (stripped, geoProjectList) =
@@ -713,27 +717,29 @@ case class CometExecRule(session: SparkSession)
             childOp.foreach(strippedBuilder.addChildren)
             val aggSerde = serde.asInstanceOf[CometOperatorSerde[HashAggregateExec]]
             val aggNativeOpt = aggSerde.convert(stripped, strippedBuilder, childOp: _*)
-            if (aggNativeOpt.isEmpty) {
-              logInfo(s"[GeoAgg] aggSerde.convert FAILED for stripped agg: $stripped")
+            aggNativeOpt match {
+              case Some(aggNativeOp) =>
+                val cometAgg = aggSerde.createExec(aggNativeOp, stripped)
+                val projExec = ProjectExec(geoProjectList, cometAgg)
+                val projBuilder =
+                  OperatorOuterClass.Operator.newBuilder().setPlanId(projExec.id)
+                val projResult = CometProjectExec
+                  .convert(projExec, projBuilder, aggNativeOp)
+                  .map(projNativeOp => CometProjectExec.createExec(projNativeOp, projExec))
+                if (projResult.isDefined) return projResult
+              case None =>
             }
-            return aggNativeOpt.flatMap { aggNativeOp =>
-              val cometAgg = aggSerde.createExec(aggNativeOp, stripped)
-              // Build a ProjectExec wrapping the native agg so CometProjectExec.convert
-              // can serialize geo exprs against the agg's output attributes.
-              val projExec = ProjectExec(geoProjectList, cometAgg)
-              val projBuilder =
-                OperatorOuterClass.Operator.newBuilder().setPlanId(projExec.id)
-              logInfo(
-                s"[GeoAgg] projExec.child.output=${projExec.child.output} " +
-                  s"geoProjectList=$geoProjectList")
-              val projResult = CometProjectExec
-                .convert(projExec, projBuilder, aggNativeOp)
-                .map(projNativeOp => CometProjectExec.createExec(projNativeOp, projExec))
-              if (projResult.isEmpty) {
-                logInfo(s"[GeoAgg] CometProjectExec.convert FAILED for projExec: $projExec")
-              }
-              projResult
+            // Native path unavailable (sparkFinalMode, show() toprettystring context, etc.).
+            // Replace geo result exprs with null literals so the JVM agg can execute without
+            // calling st_point.eval() -> CometGeoFallback.notSupported() crash.
+            // The geo columns are output as null rather than crashing.
+            val safeResultExprs = agg.resultExpressions.map {
+              case e if CometGeoExtractFromAggRule.containsGeoExpr(e) =>
+                Alias(Literal(null, e.dataType), e.name)(e.exprId, e.qualifier)
+              case e => e
             }
+            val safeAgg = agg.copy(resultExpressions = safeResultExprs)
+            return Some(safeAgg)
           case _ =>
         }
         return serde
