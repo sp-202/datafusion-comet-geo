@@ -726,6 +726,7 @@ case class CometExecRule(session: SparkSession)
             childOp.foreach(strippedBuilder.addChildren)
             val aggSerde = serde.asInstanceOf[CometOperatorSerde[HashAggregateExec]]
             val aggNativeOpt = aggSerde.convert(stripped, strippedBuilder, childOp: _*)
+            logInfo(s"[GeoAgg] aggNativeOpt=${aggNativeOpt.isDefined} child=${op.children.head.getClass.getSimpleName} strippedResults=${stripped.resultExpressions.map(_.name).mkString(",")}")
             aggNativeOpt match {
               case Some(aggNativeOp) =>
                 val cometAgg = aggSerde.createExec(aggNativeOp, stripped)
@@ -735,6 +736,7 @@ case class CometExecRule(session: SparkSession)
                 val projResult = CometProjectExec
                   .convert(projExec, projBuilder, aggNativeOp)
                   .map(projNativeOp => CometProjectExec.createExec(projNativeOp, projExec))
+                logInfo(s"[GeoAgg] projResult=${projResult.isDefined} geoList=${geoProjectList.map(_.name).mkString(",")}")
                 if (projResult.isDefined) return projResult
               case None =>
             }
