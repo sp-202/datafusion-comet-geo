@@ -21,18 +21,25 @@ package org.apache.comet.rules
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.rules.Rule
-import org.apache.spark.sql.comet.{CometColumnarToRowExec, CometSparkToColumnarExec}
-import org.apache.spark.sql.execution.{ColumnarToRowExec, RowToColumnarExec, SparkPlan}
+import org.apache.spark.sql.comet.CometSparkToColumnarExec
+import org.apache.spark.sql.execution.{RowToColumnarExec, SparkPlan}
 
 /**
- * A post-columnar transition rule that replaces Spark's default [[RowToColumnarExec]] and
- * [[ColumnarToRowExec]] with Comet's native [[CometSparkToColumnarExec]] and
- * [[CometColumnarToRowExec]].
+ * A post-columnar transition rule that replaces Spark's default [[RowToColumnarExec]]
+ * (inserted at native/JVM boundaries by [[org.apache.spark.sql.execution.ApplyColumnarRulesAndInsertTransitions]])
+ * with Comet's [[CometSparkToColumnarExec]], which converts JVM row/columnar output into
+ * Arrow `ColumnarBatch` for downstream native operators.
  *
- * This allows Comet to leverage Spark's native [[org.apache.spark.sql.execution.ApplyColumnarRulesAndInsertTransitions]]
- * mechanism to automatically determine when boundary transitions are required between native
- * columnar formats and Spark JVM row formats, enabling seamless partial rollouts and native
- * re-entry (similar to Gluten and Photon engines).
+ * Replacement is intentionally scoped: only a [[RowToColumnarExec]] that is a **direct
+ * child of a [[org.apache.spark.sql.comet.CometPlan]]** is replaced. This ensures we never
+ * inject Arrow batches into a standard Spark columnar operator or into a nested JVM
+ * subquery that expects Spark's internal columnar format.
+ *
+ * [[org.apache.spark.sql.execution.ColumnarToRowExec]] replacement is deliberately omitted
+ * here because [[EliminateRedundantTransitions]] already handles that safely and selectively
+ * (replacing with [[org.apache.spark.sql.comet.CometColumnarToRowExec]] or the native
+ * [[org.apache.spark.sql.comet.CometNativeColumnarToRowExec]] only when the child is a
+ * Comet plan).
  */
 case class CometColumnarRule(session: SparkSession) extends Rule[SparkPlan] {
   override def apply(plan: SparkPlan): SparkPlan = plan.transformDown {

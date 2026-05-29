@@ -354,36 +354,29 @@ case class CometExecRule(session: SparkSession)
         convertToComet(s, CometShuffleExchangeExec).getOrElse(s)
 
       case op =>
-        // Determine if this operator's children can safely be wrapped in a RowToColumnarExec
-        // transition if they are not already CometNativeExec.
-        val safeToConvert = op.children.forall {
-          case _: CometNativeExec => true
-          case child =>
-            val isSafeNode = child match {
-              // These operators cannot be wrapped in RowToColumnarExec because they don't produce
-              // normal rows or have special handling that would be broken by R2C.
-              case _: BroadcastExchangeExec | _: BroadcastQueryStageExec | _: ReusedExchangeExec |
-                   _: ShuffleQueryStageExec | _: AQEShuffleReadExec | _: WriteFilesExec |
-                   _: DataWritingCommandExec => false
-              // Cannot wrap Unsafe Partial Aggregates (would crash on Final aggregate buffer mismatch)
-              case c if c.getTagValue(CometExecRule.COMET_UNSAFE_PARTIAL).isDefined => false
-              // Cannot wrap Reverted Columnar Shuffles (Spark shuffle doesn't understand Arrow format)
-              case c if c.getTagValue(CometExecRule.SKIP_COMET_SHUFFLE_TAG).isDefined => false
-              case _ => true
-            }
-            // Ensure the child's schema is supported by CometSparkToColumnarExec
-            isSafeNode && CometSparkToColumnarExec.isSchemaSupported(child.schema, new scala.collection.mutable.ListBuffer[String]())
-        }
+        // Try to wrap any JVM children in CometSparkToColumnarExec so that the parent
+        // operator sees all-native children. This is the re-entry mechanism: when a JVM
+        // operator sits between two native blocks, we bridge it with the same
+        // CometScanWrapper(CometSparkToColumnarExec(jvmChild)) pattern already used for
+        // leaf scans (shouldApplySparkToColumnar). foreachUntilCometInput already
+        // recognises CometSparkToColumnarExec as a valid native input source, so the
+        // native execution block picks up the Arrow batches it produces.
+        //
+        // This is identical to how Gluten uses InputIteratorTransformer as the leaf of a
+        // re-entered WholeStageTransformer fragment.
+        val opWithBridgedChildren = wrapJvmChildrenIfSafe(op)
 
-        // if all children are native or can be safely wrapped in a transition, see if there is a
-        // registered handler for creating a native plan
-        if (safeToConvert) {
+        // Now all children are either originally-native or freshly-bridged.
+        // Only attempt operator conversion when all children ended up native.
+        if (opWithBridgedChildren.children.forall(_.isInstanceOf[CometNativeExec])) {
           val handler = allExecs
-            .get(op.getClass)
+            .get(opWithBridgedChildren.getClass)
             .map(_.asInstanceOf[CometOperatorSerde[SparkPlan]])
           handler match {
             case Some(handler) =>
-              return convertToComet(op, handler).getOrElse(op)
+              // Pass the bridged plan; fall back to the ORIGINAL op so we don't
+              // leak orphaned CometSparkToColumnarExec wrappers on failure.
+              return convertToComet(opWithBridgedChildren, handler).getOrElse(op)
             case _ =>
           }
         }
@@ -396,13 +389,13 @@ case class CometExecRule(session: SparkSession)
             // these cases specially here so we do not add a misleading 'info' message
             op
           case _ =>
-            // The operator was not converted to a Comet plan. Possible reasons for this happening:
+            // The operator was not converted to a Comet plan. Possible reasons:
             // 1. Comet does not support this operator.
-            // 2. The operator could not be supported based on query context and current
-            //    configs. In this case, it should have already been tagged with fallback
-            //    reasons.
-            // 3. The operator has children that could not be converted and cannot be wrapped.
-            if (safeToConvert && !hasExplainInfo(op)) {
+            // 2. The operator could not be supported based on query context / configs.
+            //    It should already be tagged with fallback reasons.
+            // 3. Some children could not be bridged (unsafe type, tagged, excluded node).
+            if (opWithBridgedChildren.children.forall(_.isInstanceOf[CometNativeExec])
+                && !hasExplainInfo(op)) {
               withInfo(op, s"${op.nodeName} is not supported")
             } else {
               op
@@ -774,6 +767,75 @@ case class CometExecRule(session: SparkSession)
         s"Native support for operator $opName is disabled. " +
           s"Set ${handler.enabledConfig.get.key}=true to enable it.")
       false
+    }
+  }
+
+  /**
+   * For each JVM (non-native) child of `op`, attempt to wrap it in
+   * `CometScanWrapper(CometSparkToColumnarExec(child))` — a leaf `CometNativeExec` that
+   * bridges the JVM row/columnar output into Arrow `ColumnarBatch` for the parent.
+   *
+   * This is the Comet equivalent of Gluten's `InputIteratorTransformer` leaf: the native
+   * parent operator sees a valid `CometNativeExec` child and the `CometSink.convert()`
+   * produces a `Scan` protobuf node (no `childOp` needed). At execution time
+   * `foreachUntilCometInput` recognises `CometSparkToColumnarExec` as an input source and
+   * the native block reads Arrow batches from it directly.
+   *
+   * Wrapping is skipped when the child:
+   *   - is already a `CometNativeExec`
+   *   - is a broadcast/shuffle/AQE exchange operator (different data protocol)
+   *   - carries a `COMET_UNSAFE_PARTIAL` or `SKIP_COMET_SHUFFLE_TAG` tag
+   *   - has a schema unsupported by `CometSparkToColumnarExec` (e.g. `ArrayType`)
+   *
+   * If wrapping fails (e.g. unsupported schema), the original child is left in place, so
+   * the parent will not have all-native children and conversion will be skipped safely.
+   */
+  private def wrapJvmChildrenIfSafe(op: SparkPlan): SparkPlan = {
+    if (op.children.isEmpty) return op
+    if (op.children.forall(_.isInstanceOf[CometNativeExec])) return op
+
+    val newChildren = op.children.map {
+      case child: CometNativeExec => child
+      case child if canWrapWithR2C(child) =>
+        // Reuse the same CometSink path used by shouldApplySparkToColumnar for leaf scans:
+        //   CometScanWrapper(nativeOp, CometSparkToColumnarExec(child))
+        convertToComet(child, CometSparkToColumnarExec).getOrElse(child)
+      case child => child
+    }
+
+    // Only rebuild the node when at least one child actually changed.
+    if (newChildren.zip(op.children).exists { case (n, o) => n ne o }) {
+      op.withNewChildren(newChildren)
+    } else {
+      op
+    }
+  }
+
+  /**
+   * Returns true when a JVM child plan can safely be wrapped in
+   * `CometSparkToColumnarExec` for re-entry into native execution.
+   */
+  private def canWrapWithR2C(child: SparkPlan): Boolean = {
+    // Validate schema first — rejects ArrayType, MapType, CalendarIntervalType etc.
+    // This also catches collect_set / collect_list intermediate buffer arrays.
+    val fallbackReasons = new ListBuffer[String]()
+    if (!CometSparkToColumnarExec.isSchemaSupported(child.schema, fallbackReasons)) {
+      return false
+    }
+    child match {
+      // These operators cannot be wrapped: they don't produce standard rows/batches,
+      // use different data protocols, or are already protected by other mechanisms.
+      case _: BroadcastExchangeExec | _: BroadcastQueryStageExec |
+           _: ReusedExchangeExec | _: ShuffleQueryStageExec |
+           _: AQEShuffleReadExec | _: WriteFilesExec |
+           _: DataWritingCommandExec => false
+      // Unsafe Partial Aggregate: Comet Partial → Spark Final buffer mismatch.
+      case c if c.getTagValue(CometExecRule.COMET_UNSAFE_PARTIAL).isDefined => false
+      // Reverted Columnar Shuffle: already explicitly de-Cometed by AQE.
+      case c if c.getTagValue(CometExecRule.SKIP_COMET_SHUFFLE_TAG).isDefined => false
+      // Already a CometPlan — don't double-wrap.
+      case _: CometPlan => false
+      case _ => true
     }
   }
 
