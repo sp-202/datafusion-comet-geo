@@ -728,8 +728,9 @@ case class CometExecRule(session: SparkSession)
             val aggNativeOpt = aggSerde.convert(stripped, strippedBuilder, childOp: _*)
             val childName = op.children.head.getClass.getSimpleName
             val strippedNames = stripped.resultExpressions.map(_.name).mkString(",")
-            logInfo(s"[GeoAgg] aggNativeOpt=${aggNativeOpt.isDefined}" +
-              s" child=$childName strippedResults=$strippedNames")
+            logInfo(
+              s"[GeoAgg] aggNativeOpt=${aggNativeOpt.isDefined}" +
+                s" child=$childName strippedResults=$strippedNames")
             aggNativeOpt match {
               case Some(aggNativeOp) =>
                 val cometAgg = aggSerde.createExec(aggNativeOp, stripped)
