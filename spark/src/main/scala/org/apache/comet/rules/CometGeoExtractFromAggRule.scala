@@ -126,8 +126,7 @@ object CometGeoExtractFromAggRule {
     replacePrettyGeoToAsText(expr)
 
   def replacePrettyGeoToAsText(expr: Expression): Expression = expr match {
-    case ToPrettyString(child, _)
-        if containsGeoExpr(child) && child.dataType == BinaryType =>
+    case ToPrettyString(child, _) if containsGeoExpr(child) && child.dataType == BinaryType =>
       StAsText(child)
     case other => other.mapChildren(replacePrettyGeoToAsText)
   }
