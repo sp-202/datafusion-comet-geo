@@ -26,7 +26,8 @@ import org.apache.spark.sql.execution.{RowToColumnarExec, SparkPlan}
 
 /**
  * A post-columnar transition rule that replaces Spark's default [[RowToColumnarExec]]
- * (inserted at native/JVM boundaries by [[org.apache.spark.sql.execution.ApplyColumnarRulesAndInsertTransitions]])
+ * (inserted at native/JVM boundaries by
+ * [[org.apache.spark.sql.execution.ApplyColumnarRulesAndInsertTransitions]])
  * with Comet's [[CometSparkToColumnarExec]], which converts JVM row/columnar output into
  * Arrow `ColumnarBatch` for downstream native operators.
  *

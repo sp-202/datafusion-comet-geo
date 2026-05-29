@@ -772,7 +772,7 @@ case class CometExecRule(session: SparkSession)
 
   /**
    * For each JVM (non-native) child of `op`, attempt to wrap it in
-   * `CometScanWrapper(CometSparkToColumnarExec(child))` — a leaf `CometNativeExec` that
+   * `CometScanWrapper(CometSparkToColumnarExec(child))` - a leaf `CometNativeExec` that
    * bridges the JVM row/columnar output into Arrow `ColumnarBatch` for the parent.
    *
    * This is the Comet equivalent of Gluten's `InputIteratorTransformer` leaf: the native
@@ -829,11 +829,11 @@ case class CometExecRule(session: SparkSession)
            _: ReusedExchangeExec | _: ShuffleQueryStageExec |
            _: AQEShuffleReadExec | _: WriteFilesExec |
            _: DataWritingCommandExec => false
-      // Unsafe Partial Aggregate: Comet Partial → Spark Final buffer mismatch.
+      // Unsafe Partial Aggregate: Comet Partial -> Spark Final buffer mismatch.
       case c if c.getTagValue(CometExecRule.COMET_UNSAFE_PARTIAL).isDefined => false
       // Reverted Columnar Shuffle: already explicitly de-Cometed by AQE.
       case c if c.getTagValue(CometExecRule.SKIP_COMET_SHUFFLE_TAG).isDefined => false
-      // Already a CometPlan — don't double-wrap.
+      // Already a CometPlan - don't double-wrap.
       case _: CometPlan => false
       case _ => true
     }
@@ -897,7 +897,7 @@ case class CometExecRule(session: SparkSession)
         // Only consider single-mode Final aggregates. Multi-mode Finals come from Spark's
         // distinct-aggregate rewrite, where the Comet partial (if any) feeds into a Spark
         // PartialMerge rather than directly into a Final, which is a different code path
-        // than the Comet-Partial → Spark-Final crash scenario from issue #1389.
+        // than the Comet-Partial -> Spark-Final crash scenario from issue #1389.
         val modes = agg.aggregateExpressions.map(_.mode).distinct
         if (modes == Seq(Final) &&
           !QueryPlanSerde.allAggsSupportMixedExecution(agg.aggregateExpressions) &&
