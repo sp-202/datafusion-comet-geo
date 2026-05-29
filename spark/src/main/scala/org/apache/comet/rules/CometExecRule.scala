@@ -760,8 +760,10 @@ case class CometExecRule(session: SparkSession)
                 if (projResult.isDefined) return projResult
               case None =>
             }
-          // Native serde failed (e.g. sparkFinalMode=true). Fall through to safe-null below.
-          case _ =>
+          // Native geo path failed (projResult=false). Return None so the agg stays as
+          // HashAggregateExec with original geo exprs intact -- AQE will re-plan it in the
+          // final stage where we apply the safe-null fallback on the non-native-child path.
+          case _ => return None
         }
         val nativeResult = serde
           .convert(op, builder, childOp: _*)
@@ -772,30 +774,28 @@ case class CometExecRule(session: SparkSession)
           .convert(op, builder)
           .map(nativeOp => serde.createExec(nativeOp, op))
         if (nativeResult.isDefined) return nativeResult
-      }
-      // If native conversion failed and this is a geo-bearing Final agg, replace geo result
-      // exprs with null literals so the JVM agg can execute without calling st_point.eval()
-      // -> CometGeoFallback.notSupported() crash. This covers:
-      //   - show() plans where Spark wraps resultExprs in toprettystring(geo(...))
-      //   - AQE re-planning where the Partial ran as JVM (sparkFinalMode=true)
-      op match {
-        case agg: HashAggregateExec if CometGeoExtractFromAggRule.hasGeoInResults(agg) =>
-          val safeResultExprs = agg.resultExpressions.map {
-            case e
-                if CometGeoExtractFromAggRule.containsGeoExpr(
-                  CometGeoExtractFromAggRule.unwrapAlias(e)) =>
-              // toprettystring wraps output as StringType NOT NULL -- use "" not null to
-              // avoid NPE in show() deserialization. For other types (binary geo) use null.
-              val safeLit =
-                if (e.dataType == StringType) Literal("") else Literal(null, e.dataType)
-              Alias(safeLit, e.name)(e.exprId, e.qualifier)
-            case e => e
-          }
-          logInfo(
-            s"[GeoAgg] safe-null fallback for geo agg" +
-              s" (native unavailable, replacing geo results with null)")
-          return Some(agg.copy(resultExpressions = safeResultExprs))
-        case _ =>
+        // Native children path failed for a geo-bearing agg (e.g. AQE final stage where
+        // child is AQEShuffleRead). Replace geo result exprs with safe literals so the JVM
+        // agg runs without calling st_point.eval() -> CometGeoFallback.notSupported() crash.
+        op match {
+          case agg: HashAggregateExec if CometGeoExtractFromAggRule.hasGeoInResults(agg) =>
+            val safeResultExprs = agg.resultExpressions.map {
+              case e
+                  if CometGeoExtractFromAggRule.containsGeoExpr(
+                    CometGeoExtractFromAggRule.unwrapAlias(e)) =>
+                // toprettystring output is StringType NOT NULL -- use "" not null to avoid
+                // NPE in show() deserialization. For other types (binary geo) use null.
+                val safeLit =
+                  if (e.dataType == StringType) Literal("") else Literal(null, e.dataType)
+                Alias(safeLit, e.name)(e.exprId, e.qualifier)
+              case e => e
+            }
+            logInfo(
+              s"[GeoAgg] safe-null fallback for geo agg" +
+                s" (AQE final stage, replacing geo results with null)")
+            return Some(agg.copy(resultExpressions = safeResultExprs))
+          case _ =>
+        }
       }
     }
     None
