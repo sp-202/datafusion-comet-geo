@@ -388,15 +388,27 @@ case class CometExecRule(session: SparkSession)
 
         // Now all children are either originally-native or freshly-bridged.
         // Only attempt operator conversion when all children ended up native.
-        if (opWithBridgedChildren.children.forall(_.isInstanceOf[CometNativeExec])) {
+        val allNative = opWithBridgedChildren.children.forall(_.isInstanceOf[CometNativeExec])
+        if (allNative) {
           val handler = allExecs
             .get(opWithBridgedChildren.getClass)
             .map(_.asInstanceOf[CometOperatorSerde[SparkPlan]])
           handler match {
             case Some(handler) =>
+              val result = convertToComet(opWithBridgedChildren, handler)
+              opWithBridgedChildren match {
+                case p: ProjectExec
+                    if p.projectList.exists(e =>
+                      CometGeoExtractFromAggRule.containsGeoExpr(
+                        CometGeoExtractFromAggRule.unwrapAlias(e))) =>
+                  logInfo(
+                    s"[GeoProjConvert] result=${result.isDefined}" +
+                      s" exprs=${p.projectList.map(_.getClass.getSimpleName).mkString(",")}")
+                case _ =>
+              }
               // Pass the bridged plan; fall back to geoRewrittenOp (not the original op)
               // so that any ToPrettyString(geo) rewrite is preserved even on native failure.
-              return convertToComet(opWithBridgedChildren, handler).getOrElse(geoRewrittenOp)
+              return result.getOrElse(geoRewrittenOp)
             case _ =>
           }
         }
