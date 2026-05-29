@@ -51,8 +51,8 @@ import org.apache.spark.sql.types._
 
 import org.apache.comet.{CometConf, CometExplainInfo, ExtendedExplainInfo}
 import org.apache.comet.CometConf.{COMET_SPARK_TO_ARROW_ENABLED, COMET_SPARK_TO_ARROW_SUPPORTED_OPERATOR_LIST}
-import org.apache.comet.expressions.CometGeoExpression
 import org.apache.comet.CometSparkSessionExtensions._
+import org.apache.comet.expressions.CometGeoExpression
 import org.apache.comet.rules.CometExecRule.allExecs
 import org.apache.comet.serde._
 import org.apache.comet.serde.operator._
@@ -795,10 +795,10 @@ case class CometExecRule(session: SparkSession)
                 val geoNames = geoProjectList.map(_.name).mkString(",")
                 logInfo(s"[GeoAgg] projResult=${projResult.isDefined} geoList=$geoNames")
                 if (projResult.isDefined) return projResult
-                // Geo projection serde failed — return None so AQE can re-plan with safe-null.
+                // Geo projection serde failed - return None so AQE can re-plan with safe-null.
                 return None
               case None =>
-                // Stripped agg serde failed — return None so AQE can re-plan with safe-null.
+                // Stripped agg serde failed - return None so AQE can re-plan with safe-null.
                 return None
             }
           case _ =>
