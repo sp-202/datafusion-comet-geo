@@ -20,7 +20,7 @@
 package org.apache.comet.rules
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.expressions.{Alias, Expression, NamedExpression}
+import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, Expression, NamedExpression}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.execution.aggregate.HashAggregateExec
@@ -54,21 +54,38 @@ object CometGeoExtractFromAggRule {
   /**
    * Split resultExpressions into plain and geo-carrying. Returns:
    *   - a copy of the aggregate with only plain resultExpressions
-   *   - the full project list (plain attrs ++ geo exprs) for the CometProjectExec above it
+   *   - the full project list (plain attrs ++ rewritten geo exprs) for the CometProjectExec
    *
-   * The geo exprs in resultExpressions already reference the agg's final output Attributes (Spark
-   * resolved avg(lon) -> avg_lon_attr during physical planning), so they bind correctly against
-   * stripped.output when building the outer CometProjectExec.
+   * The geo exprs reference intermediate agg result attributes (e.g. avg(lon)#378) which are
+   * inside Alias wrappers in plainExprs (e.g. Alias(avg(lon)#378, "avg_lon")#374). We must
+   * substitute these inner references with the alias output attributes (#374) so the geo exprs
+   * bind correctly against stripped.output when building the outer CometProjectExec.
    */
   def stripGeoFromResults(agg: HashAggregateExec): (HashAggregateExec, Seq[NamedExpression]) = {
     val (geoExprs, plainExprs) =
       agg.resultExpressions.partition(e => containsGeo(unwrapAlias(e)))
 
     val strippedAgg = agg.copy(resultExpressions = plainExprs)
-    val geoProjectList: Seq[NamedExpression] = plainExprs.map(_.toAttribute) ++ geoExprs
+
+    // Build substitution: alias.child (e.g. avg(lon)#378) -> alias.toAttribute (avg_lon#374)
+    val subst: Map[Expression, Attribute] = plainExprs.collect { case a: Alias =>
+      a.child -> a.toAttribute
+    }.toMap
+
+    val rewrittenGeoExprs: Seq[NamedExpression] = geoExprs.map { e =>
+      substituteRefs(e, subst).asInstanceOf[NamedExpression]
+    }
+
+    val geoProjectList: Seq[NamedExpression] = plainExprs.map(_.toAttribute) ++ rewrittenGeoExprs
 
     (strippedAgg, geoProjectList)
   }
+
+  private def substituteRefs(expr: Expression, subst: Map[Expression, Attribute]): Expression =
+    subst.get(expr) match {
+      case Some(attr) => attr
+      case None => expr.mapChildren(substituteRefs(_, subst))
+    }
 
   private def unwrapAlias(e: NamedExpression): Expression = e match {
     case Alias(child, _) => child
