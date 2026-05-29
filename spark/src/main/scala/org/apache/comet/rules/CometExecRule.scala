@@ -934,8 +934,8 @@ case class CometExecRule(session: SparkSession)
     // (e.g. Cast(StArea_replaced_with_null, StringType)) evaluates to null at runtime,
     // which violates the NOT NULL constraint on toprettystring columns and causes NPE.
     // Replace with Literal("") so show() gets an empty string instead.
-    replaced.transformExpressions {
-      case Cast(Literal(null, _), StringType, _, _) => Literal("")
+    replaced.transformExpressions { case Cast(Literal(null, _), StringType, _, _) =>
+      Literal("")
     }
   }
 
