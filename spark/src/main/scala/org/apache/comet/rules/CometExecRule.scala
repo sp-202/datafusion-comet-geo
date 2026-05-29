@@ -924,10 +924,18 @@ case class CometExecRule(session: SparkSession)
     // CometGeoExpression nodes become safe literals; Alias wrappers are untouched
     // (they still wrap the safe literal, preserving exprId/qualifier).
     // Boolean predicates (st_contains etc.) get Literal(true) so filters keep passing.
-    plan.transformExpressions { case e: CometGeoExpression =>
+    // First pass: replace geo leaf nodes with safe literals bottom-up.
+    val replaced = plan.transformExpressions { case e: CometGeoExpression =>
       if (e.dataType == StringType) Literal("")
       else if (e.dataType == BooleanType) Literal(true)
       else Literal(null, e.dataType)
+    }
+    // Second pass: any Cast(null_literal, StringType) produced by the first pass
+    // (e.g. Cast(StArea_replaced_with_null, StringType)) evaluates to null at runtime,
+    // which violates the NOT NULL constraint on toprettystring columns and causes NPE.
+    // Replace with Literal("") so show() gets an empty string instead.
+    replaced.transformExpressions {
+      case Cast(Literal(null, _), StringType, _, _) => Literal("")
     }
   }
 
