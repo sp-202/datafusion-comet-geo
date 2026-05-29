@@ -52,3 +52,16 @@ Our scoped `CometColumnarRule` then safely replaces it with `CometSparkToColumna
 Because we strictly validate the JVM child's schema in `CometExecRule` *before* converting the parent, we are guaranteed that `CometSparkToColumnarExec` will never crash on an unsupported type (like `CalendarIntervalType` or internal aggregation buffers).
 
 These changes bring Comet in line with Photon and Gluten's architectural approach while preventing documented edge cases related to manual `tryBridgeWithR2C` wrapping.
+
+## 5. Architectural Comparison with Apache Gluten (Velox Backend)
+We analyzed the codebase of Apache Gluten (specifically the Velox backend) to determine how it handles edge cases like native re-entry, arrays/maps (`collect_set`), and stage-level fallbacks.
+
+**Re-entry Mechanism:**
+Gluten's `InputIteratorTransformer` bridges JVM fallback operators back into the native plan using a `RowToVeloxColumnarExec` node. Our newly implemented `wrapJvmChildrenIfSafe` strategy in `CometExecRule` mirrors this exactly by wrapping JVM operators in `CometScanWrapper(CometSparkToColumnarExec(child))`, confirming our architectural approach is aligned with industry standards.
+
+**Handling Complex Types (e.g., `collect_set`):**
+Gluten rewrites `collect_set` into a native Velox function (`VeloxCollectSet` -> `ArrayDistinct`). Moreover, Gluten's JNI wrappers (`NativeColumnarToRowJniWrapper`) fully support serializing and deserializing `ArrayType`, `MapType`, and `StructType`. 
+Comet currently rejects `ArrayType` at boundaries because its Rust implementation does not yet natively support converting Spark `ArrayData` to Arrow Arrays efficiently. Therefore, Comet must rely on our `COMET_UNSAFE_PARTIAL` tag to prevent partial conversion of aggregates, avoiding buffer mismatch crashes.
+
+**Stage-Level Fallback Thresholds:**
+Gluten implements heuristic cost-based fallback thresholds (e.g., falling back an entire stage if there are too many native/JVM boundary transitions) to avoid JNI "ping-ponging". Databricks Photon and Comet use a greedy bottom-up approach instead. We decided to keep Comet's greedy approach as threshold-based fallback would require a larger rewrite of Comet's optimization rules.
