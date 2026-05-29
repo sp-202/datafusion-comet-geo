@@ -203,63 +203,49 @@ case class CometExecRule(session: SparkSession)
   /**
    * Tries to transform a Spark physical plan into a Comet plan.
    *
-   * This rule traverses bottom-up from the original Spark plan and for each plan node, there
-   * are a few cases to consider:
+   * This rule traverses bottom-up from the original Spark plan and for each plan node, there are
+   * a few cases to consider:
    *
-   * 1. The child(ren) of the current node `p` cannot be converted to native
-   *   In this case, we'll simply return the original Spark plan, since Comet native
-   *   execution cannot start from an arbitrary Spark operator (unless it is special node
-   *   such as scan or sink such as shuffle exchange, union etc., which are wrapped by
-   *   `CometScanWrapper` and `CometSinkPlaceHolder` respectively).
+   *   1. The child(ren) of the current node `p` cannot be converted to native In this case, we'll
+   *      simply return the original Spark plan, since Comet native execution cannot start from an
+   *      arbitrary Spark operator (unless it is special node such as scan or sink such as shuffle
+   *      exchange, union etc., which are wrapped by `CometScanWrapper` and `CometSinkPlaceHolder`
+   *      respectively).
    *
-   * 2. The child(ren) of the current node `p` can be converted to native
-   *   There are two sub-cases for this scenario: 1) This node `p` can also be converted to
-   *   native. In this case, we'll create a new native Comet operator for `p` and connect it with
-   *   its previously converted child(ren); 2) This node `p` cannot be converted to native. In
-   *   this case, similar to 1) above, we simply return `p` as it is. Its child(ren) would still
-   *   be native Comet operators.
+   * 2. The child(ren) of the current node `p` can be converted to native There are two sub-cases
+   * for this scenario: 1) This node `p` can also be converted to native. In this case, we'll
+   * create a new native Comet operator for `p` and connect it with its previously converted
+   * child(ren); 2) This node `p` cannot be converted to native. In this case, similar to 1)
+   * above, we simply return `p` as it is. Its child(ren) would still be native Comet operators.
    *
    * After this rule finishes, we'll do another pass on the final plan to convert all adjacent
-   * Comet native operators into a single native execution block. Please see where
-   * `convertBlock` is called below.
+   * Comet native operators into a single native execution block. Please see where `convertBlock`
+   * is called below.
    *
    * Here are a few examples:
    *
-   *     Scan                       ======>             CometScan
-   *      |                                                |
-   *     Filter                                         CometFilter
-   *      |                                                |
-   *     HashAggregate                                  CometHashAggregate
-   *      |                                                |
-   *     Exchange                                       CometExchange
-   *      |                                                |
-   *     HashAggregate                                  CometHashAggregate
-   *      |                                                |
-   *     UnsupportedOperator                            UnsupportedOperator
+   * Scan ======> CometScan
+   * \| | Filter CometFilter
+   * \| | HashAggregate CometHashAggregate
+   * \| | Exchange CometExchange
+   * \| | HashAggregate CometHashAggregate
+   * \| | UnsupportedOperator UnsupportedOperator
    *
    * Native execution doesn't necessarily have to start from `CometScan`:
    *
-   *     Scan                       =======>            CometScan
-   *      |                                                |
-   *     UnsupportedOperator                            UnsupportedOperator
-   *      |                                                |
-   *     HashAggregate                                  HashAggregate
-   *      |                                                |
-   *     Exchange                                       CometExchange
-   *      |                                                |
-   *     HashAggregate                                  CometHashAggregate
-   *      |                                                |
-   *     UnsupportedOperator                            UnsupportedOperator
+   * Scan =======> CometScan
+   * \| | UnsupportedOperator UnsupportedOperator
+   * \| | HashAggregate HashAggregate
+   * \| | Exchange CometExchange
+   * \| | HashAggregate CometHashAggregate
+   * \| | UnsupportedOperator UnsupportedOperator
    *
    * A sink can also be Comet operators other than `CometExchange`, for instance `CometUnion`:
    *
-   *     Scan   Scan                =======>          CometScan CometScan
-   *      |      |                                       |         |
-   *     Filter Filter                                CometFilter CometFilter
-   *      |      |                                       |         |
-   *        Union                                         CometUnion
-   *          |                                               |
-   *        Project                                       CometProject
+   * Scan Scan =======> CometScan CometScan
+   * \| | | | Filter Filter CometFilter CometFilter
+   * \| | | | Union CometUnion
+   * \| | Project CometProject
    */
   // spotless:on
   private def transform(plan: SparkPlan): SparkPlan = {
@@ -395,7 +381,7 @@ case class CometExecRule(session: SparkSession)
             //    It should already be tagged with fallback reasons.
             // 3. Some children could not be bridged (unsafe type, tagged, excluded node).
             if (opWithBridgedChildren.children.forall(_.isInstanceOf[CometNativeExec])
-                && !hasExplainInfo(op)) {
+              && !hasExplainInfo(op)) {
               withInfo(op, s"${op.nodeName} is not supported")
             } else {
               op
@@ -772,14 +758,14 @@ case class CometExecRule(session: SparkSession)
 
   /**
    * For each JVM (non-native) child of `op`, attempt to wrap it in
-   * `CometScanWrapper(CometSparkToColumnarExec(child))` - a leaf `CometNativeExec` that
-   * bridges the JVM row/columnar output into Arrow `ColumnarBatch` for the parent.
+   * `CometScanWrapper(CometSparkToColumnarExec(child))` - a leaf `CometNativeExec` that bridges
+   * the JVM row/columnar output into Arrow `ColumnarBatch` for the parent.
    *
-   * This is the Comet equivalent of Gluten's `InputIteratorTransformer` leaf: the native
-   * parent operator sees a valid `CometNativeExec` child and the `CometSink.convert()`
-   * produces a `Scan` protobuf node (no `childOp` needed). At execution time
-   * `foreachUntilCometInput` recognises `CometSparkToColumnarExec` as an input source and
-   * the native block reads Arrow batches from it directly.
+   * This is the Comet equivalent of Gluten's `InputIteratorTransformer` leaf: the native parent
+   * operator sees a valid `CometNativeExec` child and the `CometSink.convert()` produces a `Scan`
+   * protobuf node (no `childOp` needed). At execution time `foreachUntilCometInput` recognises
+   * `CometSparkToColumnarExec` as an input source and the native block reads Arrow batches from
+   * it directly.
    *
    * Wrapping is skipped when the child:
    *   - is already a `CometNativeExec`
@@ -787,8 +773,8 @@ case class CometExecRule(session: SparkSession)
    *   - carries a `COMET_UNSAFE_PARTIAL` or `SKIP_COMET_SHUFFLE_TAG` tag
    *   - has a schema unsupported by `CometSparkToColumnarExec` (e.g. `CalendarIntervalType`)
    *
-   * If wrapping fails (e.g. unsupported schema), the original child is left in place, so
-   * the parent will not have all-native children and conversion will be skipped safely.
+   * If wrapping fails (e.g. unsupported schema), the original child is left in place, so the
+   * parent will not have all-native children and conversion will be skipped safely.
    */
   private def wrapJvmChildrenIfSafe(op: SparkPlan): SparkPlan = {
     if (op.children.isEmpty) return op
@@ -812,8 +798,8 @@ case class CometExecRule(session: SparkSession)
   }
 
   /**
-   * Returns true when a JVM child plan can safely be wrapped in
-   * `CometSparkToColumnarExec` for re-entry into native execution.
+   * Returns true when a JVM child plan can safely be wrapped in `CometSparkToColumnarExec` for
+   * re-entry into native execution.
    */
   private def canWrapWithR2C(child: SparkPlan): Boolean = {
     // Validate schema first rejects CalendarIntervalType, UserDefinedType, etc.
@@ -825,10 +811,10 @@ case class CometExecRule(session: SparkSession)
     child match {
       // These operators cannot be wrapped: they don't produce standard rows/batches,
       // use different data protocols, or are already protected by other mechanisms.
-      case _: BroadcastExchangeExec | _: BroadcastQueryStageExec |
-           _: ReusedExchangeExec | _: ShuffleQueryStageExec |
-           _: AQEShuffleReadExec | _: WriteFilesExec |
-           _: DataWritingCommandExec => false
+      case _: BroadcastExchangeExec | _: BroadcastQueryStageExec | _: ReusedExchangeExec |
+          _: ShuffleQueryStageExec | _: AQEShuffleReadExec | _: WriteFilesExec |
+          _: DataWritingCommandExec =>
+        false
       // Unsafe Partial Aggregate: Comet Partial -> Spark Final buffer mismatch.
       case c if c.getTagValue(CometExecRule.COMET_UNSAFE_PARTIAL).isDefined => false
       // Reverted Columnar Shuffle: already explicitly de-Cometed by AQE.
