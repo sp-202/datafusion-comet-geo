@@ -22,7 +22,7 @@ package org.apache.comet.rules
 import scala.collection.mutable.ListBuffer
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.expressions.{Alias, Divide, DoubleLiteral, EqualNullSafe, EqualTo, Expression, FloatLiteral, GreaterThan, GreaterThanOrEqual, KnownFloatingPointNormalized, LessThan, LessThanOrEqual, Literal, NamedExpression, Remainder}
+import org.apache.spark.sql.catalyst.expressions.{Alias, Cast, Divide, DoubleLiteral, EqualNullSafe, EqualTo, Expression, FloatLiteral, GreaterThan, GreaterThanOrEqual, KnownFloatingPointNormalized, LessThan, LessThanOrEqual, Literal, NamedExpression, Remainder, ToPrettyString}
 import org.apache.spark.sql.catalyst.expressions.aggregate.{AggregateMode, Final, Partial}
 import org.apache.spark.sql.catalyst.optimizer.NormalizeNaNAndZero
 import org.apache.spark.sql.catalyst.rules.Rule
@@ -369,17 +369,25 @@ case class CometExecRule(session: SparkSession)
           case _ =>
         }
 
-        // ProjectExec: rewrite ToPrettyString(geo) -> StAsText(geo) before serde so that
-        // show()-style toprettystring wrappers serialize natively as WKT strings.
+        // ProjectExec carrying geo: rewrite ALL ToPrettyString wrappers before serde.
+        //   - ToPrettyString(geoExpr)  -> StAsText(geoExpr)  (WKT string natively)
+        //   - ToPrettyString(plainExpr) -> Cast(plainExpr, StringType)  (standard cast)
+        // ToPrettyString is a Spark-internal show() helper that DataFusion does not know
+        // about; leaving it in the projectList causes garbled output for non-geo columns.
         val geoRewrittenOp: SparkPlan = op match {
           case proj: ProjectExec
               if proj.projectList.exists(e =>
                 CometGeoExtractFromAggRule.containsGeoExpr(
                   CometGeoExtractFromAggRule.unwrapAlias(e))) =>
-            val rewritten = proj.projectList.map { e =>
-              CometGeoExtractFromAggRule
-                .replacePrettyGeoToAsText(e)
-                .asInstanceOf[NamedExpression]
+            val rewritten = proj.projectList.map { ne =>
+              val replaced = ne.transformUp {
+                case ToPrettyString(child, _)
+                    if CometGeoExtractFromAggRule.containsGeoExpr(child) =>
+                  org.apache.comet.expressions.StAsText(child)
+                case ToPrettyString(child, _) =>
+                  Cast(child, StringType)
+              }
+              replaced.asInstanceOf[NamedExpression]
             }
             if (rewritten != proj.projectList) proj.copy(projectList = rewritten) else proj
           case other => other
