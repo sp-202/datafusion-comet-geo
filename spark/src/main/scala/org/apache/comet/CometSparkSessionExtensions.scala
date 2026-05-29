@@ -169,8 +169,11 @@ class CometSparkSessionExtensions
     override def preColumnarTransitions: Rule[SparkPlan] = new Rule[SparkPlan] {
       override val ruleName: String = "CometPreColumnarTransitions"
       override def apply(plan: SparkPlan): SparkPlan = {
-        val afterExec = CometExecRule(session).apply(plan)
-        CometGeoExtractFromAggRule(session).apply(afterExec)
+        // Extract geo from HashAggregateExec.resultExpressions BEFORE CometExecRule converts
+        // HashAggregateExec -> CometHashAggregateExec. After extraction the new ProjectExec
+        // above the aggregate is then converted to CometProject by CometExecRule.
+        val afterGeoExtract = CometGeoExtractFromAggRule(session).apply(plan)
+        CometExecRule(session).apply(afterGeoExtract)
       }
     }
 
