@@ -90,56 +90,60 @@ case class CometGeoPreAggregateRule(session: SparkSession) extends Rule[LogicalP
     agg.aggregateExpressions.exists(e => containsGeo(unwrapAlias(e)))
 
   /**
-   * Rewrite: Aggregate(..., [avg(lon) AS avg_lon, st_point(avg(lon), avg(lat)) AS centroid])
-   * Into: Project([avg_lon, st_point(avg_lon_attr, avg_lat_attr) AS centroid]) +- Aggregate(...,
-   * [avg(lon) AS avg_lon, avg(lat) AS avg_lat])
+   * Rewrite: Aggregate(keys, [avg(lon) AS avg_lon, st_point(avg(lon), avg(lat)) AS centroid])
+   * Into: Project([avg_lon_attr, st_point(avg_lon_attr, avg_lat_attr) AS centroid]) +-
+   * Aggregate(keys, [avg(lon) AS avg_lon, avg(lat) AS _geo_agg_lat])
    *
-   * Each aggregate result expression that contains a geo call is split: the underlying non-geo
-   * aggregate computations stay inside the Aggregate, and the geo wrapping is pushed into an
-   * outer Project that CometExecRule can convert to CometProject.
+   * For each geo-carrying result expression, every AggregateExpression it references is ensured
+   * to be emitted by the inner Aggregate (adding a new alias if not already present). The outer
+   * Project replaces each AggregateExpression with the corresponding output Attribute, making the
+   * geo expression safe to evaluate as a plain Project with no agg nodes inside it.
    */
   private def liftGeoFromAggregateResults(agg: Aggregate): LogicalPlan = {
-    // Separate aggregate exprs into geo-carrying and plain
-    val (geoExprs, plainExprs) =
-      agg.aggregateExpressions.partition(e => containsGeo(unwrapAlias(e)))
+    // Build a map from AggregateExpression canonical form -> existing output Attribute
+    // for agg exprs that are already emitted by the Aggregate.
+    val existingAggMap: Map[Expression, Attribute] = agg.aggregateExpressions
+      .collect { case ne =>
+        ne.toAttribute -> unwrapAlias(ne)
+      }
+      .collect { case (attr, ae: AggregateExpression) => ae -> attr }
+      .toMap
 
-    // For each geo-carrying expr, replace the geo parts with fresh attribute refs
-    // and collect the inner non-geo exprs that the agg must emit
     val extraAggExprs = scala.collection.mutable.ArrayBuffer.empty[NamedExpression]
-    val subst = scala.collection.mutable.Map.empty[Expression, Attribute]
+    val aggExprToAttr = scala.collection.mutable.Map.empty[Expression, Attribute]
+    aggExprToAttr ++= existingAggMap
 
-    def extractAggLeaves(expr: Expression): Expression = expr match {
+    // Ensure every AggregateExpression reachable from expr is emitted by the Aggregate.
+    // Returns the expression with AggregateExpression nodes replaced by their output Attributes.
+    def replaceAggExprs(expr: Expression): Expression = expr match {
       case e if e.isInstanceOf[CometGeoExpression] =>
-        // Geo node: keep it in place but recurse into its children so any agg args get aliased
-        e.mapChildren(extractAggLeaves)
+        e.mapChildren(replaceAggExprs)
       case ae: AggregateExpression =>
-        // AggregateExpression cannot appear in a Project - alias it so the Aggregate emits
-        // the computed value as a plain attribute the outer Project can reference
-        subst.getOrElseUpdate(
+        aggExprToAttr.getOrElseUpdate(
           ae, {
             val a = Alias(ae, s"_geo_agg_${ae.hashCode().toHexString}")()
             extraAggExprs += a
             a.toAttribute
           })
       case other =>
-        other.mapChildren(extractAggLeaves)
+        other.mapChildren(replaceAggExprs)
     }
 
-    val outerProjectExprs: Seq[NamedExpression] = geoExprs.map {
-      case Alias(child, name) =>
-        val newChild = extractAggLeaves(child)
-        Alias(newChild, name)()
-      case other =>
-        val newExpr = extractAggLeaves(other)
-        newExpr.asInstanceOf[NamedExpression]
+    val (geoExprs, plainExprs) =
+      agg.aggregateExpressions.partition(e => containsGeo(unwrapAlias(e)))
+
+    // Build outer project expressions: geo-carrying exprs with AggExpr nodes replaced by attrs
+    val outerGeoExprs: Seq[NamedExpression] = geoExprs.map {
+      case Alias(child, name) => Alias(replaceAggExprs(child), name)()
+      case other => replaceAggExprs(other).asInstanceOf[NamedExpression]
     }
 
-    // New aggregate emits plain exprs + extra aliases for geo inputs
+    // New aggregate: plain non-geo exprs + any extra aliases needed for geo inputs
     val newAgg = agg.copy(aggregateExpressions = plainExprs ++ extraAggExprs.toSeq)
 
-    // Outer project: all plain agg outputs (by attribute) + geo result exprs
-    val plainAttrs: Seq[NamedExpression] = plainExprs.map(_.toAttribute)
-    val outerList: Seq[NamedExpression] = plainAttrs ++ outerProjectExprs
+    // Outer project: plain agg outputs by attribute reference + geo exprs
+    val outerList: Seq[NamedExpression] =
+      plainExprs.map(_.toAttribute) ++ outerGeoExprs
     Project(outerList, newAgg)
   }
 
