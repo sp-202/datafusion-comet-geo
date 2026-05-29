@@ -21,14 +21,16 @@ package org.apache.comet.expressions
 
 import org.apache.spark.sql.catalyst.FunctionIdentifier
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.expressions.{BinaryExpression, Expression, ExpressionInfo, NullIntolerant, UnaryExpression}
+import org.apache.spark.sql.catalyst.expressions.{BinaryExpression, CodegenFallback, Expression, ExpressionInfo, NullIntolerant, UnaryExpression}
 import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, ExprCode}
 import org.apache.spark.sql.types.{BinaryType, BooleanType, DataType, DoubleType, IntegerType, LongType, StringType}
 import org.apache.spark.unsafe.types.UTF8String
 
 // Marker trait - lets the optimizer rule identify all geo expressions without
 // pattern-matching every case class individually.
-trait CometGeoExpression
+// CodegenFallback makes Spark use interpreted eval when a geo expression ends up
+// inside a JVM WholeStageCodegen context (e.g. result projection of a JVM aggregate).
+trait CometGeoExpression extends CodegenFallback
 
 // ---- Binary geo predicates -----------------------------------------------
 

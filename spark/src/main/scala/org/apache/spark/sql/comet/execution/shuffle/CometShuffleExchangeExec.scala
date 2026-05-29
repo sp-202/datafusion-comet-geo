@@ -253,10 +253,12 @@ object CometShuffleExchangeExec
           op,
           CometShuffleExchangeExec(op, shuffleType = CometColumnarShuffle))
       case Some(CometNativeShuffle) =>
-        // Native was chosen but children are not native - fall through to columnar if possible.
-        // This can happen when getSupportLevel selected native but a later pass changed the plan.
-        throw new IllegalStateException(
-          "shuffleSupported chose native shuffle but children are not all CometNativeExec")
+        // AQE re-optimization reshaped the subtree after the initial native decision: the child
+        // is no longer a CometNativeExec. Fall back to columnar shuffle so execution can proceed.
+        CometSinkPlaceHolder(
+          nativeOp,
+          op,
+          CometShuffleExchangeExec(op, shuffleType = CometColumnarShuffle))
       case None =>
         throw new IllegalStateException()
     }
