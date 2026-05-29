@@ -20,7 +20,7 @@
 package org.apache.comet.rules
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, Expression, NamedExpression}
+import org.apache.spark.sql.catalyst.expressions.{Alias, Expression, NamedExpression}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.execution.{ProjectExec, SparkPlan}
 import org.apache.spark.sql.execution.aggregate.HashAggregateExec
@@ -70,12 +70,7 @@ case class CometGeoExtractFromAggRule(session: SparkSession) extends Rule[SparkP
     val (geoExprs, plainExprs) =
       agg.resultExpressions.partition(e => containsGeo(unwrapAlias(e)))
 
-    // The aggregate's output attributes for the plain exprs
     val plainAttrs: Seq[NamedExpression] = plainExprs.map(_.toAttribute)
-
-    // Build a map from existing output attribute -> itself for substitution
-    val attrMap: Map[Attribute, Attribute] =
-      plainExprs.map(ne => ne.toAttribute -> ne.toAttribute).toMap
 
     // The geo exprs already reference the agg's output attributes directly
     // (Spark has already resolved avg(lon) -> avg_lon_attr in resultExpressions)
