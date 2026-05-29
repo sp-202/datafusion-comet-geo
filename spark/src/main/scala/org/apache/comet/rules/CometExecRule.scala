@@ -394,20 +394,20 @@ case class CometExecRule(session: SparkSession)
             .map(_.asInstanceOf[CometOperatorSerde[SparkPlan]])
           handler match {
             case Some(handler) =>
-              // Pass the bridged plan; fall back to the ORIGINAL op so we don't
-              // leak orphaned CometSparkToColumnarExec wrappers on failure.
-              return convertToComet(opWithBridgedChildren, handler).getOrElse(op)
+              // Pass the bridged plan; fall back to geoRewrittenOp (not the original op)
+              // so that any ToPrettyString(geo) rewrite is preserved even on native failure.
+              return convertToComet(opWithBridgedChildren, handler).getOrElse(geoRewrittenOp)
             case _ =>
           }
         }
 
-        op match {
+        geoRewrittenOp match {
           case _: CometPlan | _: AQEShuffleReadExec | _: BroadcastExchangeExec |
               _: BroadcastQueryStageExec | _: AdaptiveSparkPlanExec | _: ExecutedCommandExec |
               _: V2CommandExec =>
             // Some execs should never be replaced. We include
             // these cases specially here so we do not add a misleading 'info' message
-            op
+            geoRewrittenOp
           case _ =>
             // The operator was not converted to a Comet plan. Possible reasons:
             // 1. Comet does not support this operator.
@@ -415,10 +415,10 @@ case class CometExecRule(session: SparkSession)
             //    It should already be tagged with fallback reasons.
             // 3. Some children could not be bridged (unsafe type, tagged, excluded node).
             if (opWithBridgedChildren.children.forall(_.isInstanceOf[CometNativeExec])
-              && !hasExplainInfo(op)) {
-              withInfo(op, s"${op.nodeName} is not supported")
+              && !hasExplainInfo(geoRewrittenOp)) {
+              withInfo(geoRewrittenOp, s"${geoRewrittenOp.nodeName} is not supported")
             } else {
-              op
+              geoRewrittenOp
             }
         }
     }
