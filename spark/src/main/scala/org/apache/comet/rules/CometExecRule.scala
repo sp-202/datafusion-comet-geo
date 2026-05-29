@@ -992,7 +992,11 @@ case class CometExecRule(session: SparkSession)
       case c if c.getTagValue(CometExecRule.COMET_UNSAFE_PARTIAL).isDefined => false
       // Reverted Columnar Shuffle: already explicitly de-Cometed by AQE.
       case c if c.getTagValue(CometExecRule.SKIP_COMET_SHUFFLE_TAG).isDefined => false
-      // Already a CometPlan - don't double-wrap.
+      // CometSparkToColumnarExec (shown as CometSparkColumnarToColumnar when child is columnar)
+      // is a JVM-to-Arrow bridge that is safe to wrap in a CometScanWrapper so that native
+      // operators above it see a CometNativeExec child with a proper nativeOp proto chain.
+      case _: CometSparkToColumnarExec => true
+      // Other CometPlan nodes - don't double-wrap.
       case _: CometPlan => false
       // Geo Final aggregate: st_point has no JVM eval(). Wrapping it in CometSparkToColumnarExec
       // would cause TungstenAggregationIterator to call st_point.eval() -> CometGeoFallback crash.
