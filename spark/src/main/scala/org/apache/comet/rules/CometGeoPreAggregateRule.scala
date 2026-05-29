@@ -110,18 +110,19 @@ case class CometGeoPreAggregateRule(session: SparkSession) extends Rule[LogicalP
 
     def extractAggLeaves(expr: Expression): Expression = expr match {
       case e if e.isInstanceOf[CometGeoExpression] =>
-        // Children of the geo expr are either plain agg results or further geo - recurse
+        // Geo node: keep it in place but recurse into its children so any agg args get aliased
         e.mapChildren(extractAggLeaves)
-      case e if !containsGeo(e) && e.children.nonEmpty =>
-        // Non-geo sub-expression with children: this is an agg function or derived expr
-        // that the Aggregate must compute - alias it and replace with its attribute
+      case ae: AggregateExpression =>
+        // AggregateExpression cannot appear in a Project - alias it so the Aggregate emits
+        // the computed value as a plain attribute the outer Project can reference
         subst.getOrElseUpdate(
-          e, {
-            val a = Alias(e, s"_geo_agg_${e.hashCode().toHexString}")()
+          ae, {
+            val a = Alias(ae, s"_geo_agg_${ae.hashCode().toHexString}")()
             extraAggExprs += a
             a.toAttribute
           })
-      case other => other
+      case other =>
+        other.mapChildren(extractAggLeaves)
     }
 
     val outerProjectExprs: Seq[NamedExpression] = geoExprs.map {
