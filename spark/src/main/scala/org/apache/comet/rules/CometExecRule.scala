@@ -760,7 +760,7 @@ case class CometExecRule(session: SparkSession)
                 if (projResult.isDefined) return projResult
               case None =>
             }
-            // Native serde failed (e.g. sparkFinalMode=true). Fall through to safe-null below.
+          // Native serde failed (e.g. sparkFinalMode=true). Fall through to safe-null below.
           case _ =>
         }
         val nativeResult = serde
