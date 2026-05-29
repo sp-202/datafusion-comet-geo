@@ -52,7 +52,7 @@ case class CometGeoExtractFromAggRule(session: SparkSession) extends Rule[SparkP
       case agg: HashAggregateExec =>
         System.err.println(
           s"[GeoExtract] HashAggregateExec modes=${agg.aggregateExpressions.map(_.mode).distinct}" +
-            s" resultExprs=${agg.resultExpressions.map(_.getClass.getSimpleName + ":" + _)}")
+            s" resultExprs=${agg.resultExpressions.map(e => e.getClass.getSimpleName + ":" + e)}")
       case _ =>
     }
     plan.transformUp {
