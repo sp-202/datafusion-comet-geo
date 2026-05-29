@@ -786,7 +786,8 @@ case class CometExecRule(session: SparkSession)
                   CometGeoExtractFromAggRule.unwrapAlias(e)) =>
               // toprettystring wraps output as StringType NOT NULL -- use "" not null to
               // avoid NPE in show() deserialization. For other types (binary geo) use null.
-              val safeLit = if (e.dataType == StringType) Literal("") else Literal(null, e.dataType)
+              val safeLit =
+                if (e.dataType == StringType) Literal("") else Literal(null, e.dataType)
               Alias(safeLit, e.name)(e.exprId, e.qualifier)
             case e => e
           }
