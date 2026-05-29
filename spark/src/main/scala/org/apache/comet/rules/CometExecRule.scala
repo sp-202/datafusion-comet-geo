@@ -883,9 +883,9 @@ case class CometExecRule(session: SparkSession)
   }
 
   /**
-   * Replace every geo sub-expression in `plan`'s expressions with a type-safe literal so that
-   * JVM codegen never calls geo.eval() -> CometGeoFallback.notSupported(). Applies to ALL
-   * operator types (ProjectExec, FilterExec, SortExec, HashAggregateExec, etc.).
+   * Replace every geo sub-expression in `plan`'s expressions with a type-safe literal so that JVM
+   * codegen never calls geo.eval() -> CometGeoFallback.notSupported(). Applies to ALL operator
+   * types (ProjectExec, FilterExec, SortExec, HashAggregateExec, etc.).
    *
    * Replacement rules:
    *   - A geo expr whose parent is Alias: the whole Alias gets a safe-literal child.
