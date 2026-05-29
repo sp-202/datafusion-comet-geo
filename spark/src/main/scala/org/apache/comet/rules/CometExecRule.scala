@@ -784,7 +784,10 @@ case class CometExecRule(session: SparkSession)
             case e
                 if CometGeoExtractFromAggRule.containsGeoExpr(
                   CometGeoExtractFromAggRule.unwrapAlias(e)) =>
-              Alias(Literal(null, e.dataType), e.name)(e.exprId, e.qualifier)
+              // toprettystring wraps output as StringType NOT NULL -- use "" not null to
+              // avoid NPE in show() deserialization. For other types (binary geo) use null.
+              val safeLit = if (e.dataType == StringType) Literal("") else Literal(null, e.dataType)
+              Alias(safeLit, e.name)(e.exprId, e.qualifier)
             case e => e
           }
           logInfo(
