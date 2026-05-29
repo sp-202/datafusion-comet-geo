@@ -121,9 +121,12 @@ object CometGeoExtractFromAggRule {
 
   // Replace ToPrettyString(geoExpr, _) nodes with StAsText(geoExpr) so that show()-style
   // display plans produce WKT strings natively instead of falling back to safe-null.
-  private def replaceToPrettyStringWithAsText(expr: Expression): Expression = expr match {
+  private def replaceToPrettyStringWithAsText(expr: Expression): Expression =
+    replacePrettyGeoToAsText(expr)
+
+  def replacePrettyGeoToAsText(expr: Expression): Expression = expr match {
     case ToPrettyString(child, _) if containsGeoExpr(child) => StAsText(child)
-    case other => other.mapChildren(replaceToPrettyStringWithAsText)
+    case other => other.mapChildren(replacePrettyGeoToAsText)
   }
 
   def unwrapAlias(e: NamedExpression): Expression = e match {

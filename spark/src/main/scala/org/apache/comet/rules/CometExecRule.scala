@@ -368,7 +368,23 @@ case class CometExecRule(session: SparkSession)
           case _ =>
         }
 
-        val opWithBridgedChildren = wrapJvmChildrenIfSafe(op)
+        // ProjectExec: rewrite ToPrettyString(geo) -> StAsText(geo) before serde so that
+        // show()-style toprettystring wrappers serialize natively as WKT strings.
+        val geoRewrittenOp: SparkPlan = op match {
+          case proj: ProjectExec
+              if proj.projectList.exists(e =>
+                CometGeoExtractFromAggRule.containsGeoExpr(
+                  CometGeoExtractFromAggRule.unwrapAlias(e))) =>
+            val rewritten = proj.projectList.map { e =>
+              CometGeoExtractFromAggRule
+                .replacePrettyGeoToAsText(e)
+                .asInstanceOf[NamedExpression]
+            }
+            if (rewritten != proj.projectList) proj.copy(projectList = rewritten) else proj
+          case other => other
+        }
+
+        val opWithBridgedChildren = wrapJvmChildrenIfSafe(geoRewrittenOp)
 
         // Now all children are either originally-native or freshly-bridged.
         // Only attempt operator conversion when all children ended up native.
@@ -913,6 +929,13 @@ case class CometExecRule(session: SparkSession)
       // would cause TungstenAggregationIterator to call st_point.eval() -> CometGeoFallback crash.
       // These must go through convertToComet's geo extraction path, not the re-entry bridge.
       case h: HashAggregateExec if CometGeoExtractFromAggRule.hasGeoInResults(h) => false
+      // Geo Project: any ProjectExec carrying a geo expression must go through the native
+      // CometProjectExec path. Wrapping it would let JVM codegen call geo.eval() -> crash.
+      case p: ProjectExec
+          if p.projectList.exists(e =>
+            CometGeoExtractFromAggRule.containsGeoExpr(
+              CometGeoExtractFromAggRule.unwrapAlias(e))) =>
+        false
       case _ => true
     }
   }
