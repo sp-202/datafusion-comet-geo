@@ -612,6 +612,7 @@ case class CometExecRule(session: SparkSession)
       // are non-Comet HashAggregate/ObjectHashAggregate operators that remained JVM after the main
       // transform pass. See https://github.com/apache/datafusion-comet/issues/4004.
       if (CometConf.COMET_EXEC_SHUFFLE_REVERT_REDUNDANT_COLUMNAR_ENABLED.get()) {
+        logInfo(s"[GeoRevert] plan before revert:\n${newPlan.treeString}")
         newPlan = revertRedundantColumnarShuffle(newPlan)
       }
 
