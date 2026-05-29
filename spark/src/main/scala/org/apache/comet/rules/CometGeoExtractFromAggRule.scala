@@ -49,12 +49,12 @@ case class CometGeoExtractFromAggRule(session: SparkSession) extends Rule[SparkP
 object CometGeoExtractFromAggRule {
 
   def hasGeoInResults(agg: HashAggregateExec): Boolean =
-    agg.resultExpressions.exists(e => isTopLevelGeo(unwrapAlias(e)))
+    agg.resultExpressions.exists(e => containsGeoExpr(unwrapAlias(e)))
 
   /**
    * Returns true only when the expression itself is a geo expression (not wrapped in non-geo
-   * functions like toprettystring). This prevents show() display plans from triggering geo
-   * extraction -- in those plans Spark wraps every result in toprettystring(...).
+   * functions like toprettystring). Used by stripGeoFromResults to identify which result
+   * expressions to hoist into the outer CometProjectExec.
    */
   def isTopLevelGeo(expr: Expression): Boolean = expr.isInstanceOf[CometGeoExpression]
 
@@ -70,7 +70,7 @@ object CometGeoExtractFromAggRule {
    */
   def stripGeoFromResults(agg: HashAggregateExec): (HashAggregateExec, Seq[NamedExpression]) = {
     val (geoExprs, plainExprs) =
-      agg.resultExpressions.partition(e => isTopLevelGeo(unwrapAlias(e)))
+      agg.resultExpressions.partition(e => containsGeoExpr(unwrapAlias(e)))
 
     val strippedAgg = agg.copy(resultExpressions = plainExprs)
 

@@ -357,6 +357,17 @@ case class CometExecRule(session: SparkSession)
         //
         // This is identical to how Gluten uses InputIteratorTransformer as the leaf of a
         // re-entered WholeStageTransformer fragment.
+
+        // Geo-bearing Final HashAggregateExec: intercept before the all-native-children check.
+        // In AQE re-planning the child is AQEShuffleRead (not CometNativeExec), so the normal
+        // forall-native path never fires. convertToComet will either convert natively (good
+        // path) or apply the safe-null fallback to prevent CometGeoFallback.notSupported().
+        op match {
+          case agg: HashAggregateExec if CometGeoExtractFromAggRule.hasGeoInResults(agg) =>
+            return convertToComet(agg, CometHashAggregateExec).getOrElse(op)
+          case _ =>
+        }
+
         val opWithBridgedChildren = wrapJvmChildrenIfSafe(op)
 
         // Now all children are either originally-native or freshly-bridged.
@@ -721,11 +732,6 @@ case class CometExecRule(session: SparkSession)
         // before serde (geo cannot be serialized against aggregateAttributes), convert the
         // stripped aggregate natively, then build a CometProjectExec above it that re-applies
         // the geo exprs bound against the stripped agg's output attributes.
-        //
-        // If native conversion fails (e.g. sparkFinalMode=true because the Partial ran as JVM,
-        // or show() wraps results in toprettystring), we fall back to a safe JVM path: replace
-        // each geo result expression with a typed null literal so the JVM aggregate can run
-        // without calling st_point.eval() -> CometGeoFallback.notSupported().
         op match {
           case agg: HashAggregateExec if CometGeoExtractFromAggRule.hasGeoInResults(agg) =>
             val (stripped, geoProjectList) =
@@ -738,7 +744,7 @@ case class CometExecRule(session: SparkSession)
             val childName = op.children.head.getClass.getSimpleName
             val strippedNames = stripped.resultExpressions.map(_.name).mkString(",")
             logInfo(
-              s"[GeoAgg] aggNativeOpt=${aggNativeOpt.isDefined}" +
+              s"[GeoAgg] native path: aggNativeOpt=${aggNativeOpt.isDefined}" +
                 s" child=$childName strippedResults=$strippedNames")
             aggNativeOpt match {
               case Some(aggNativeOp) =>
@@ -754,28 +760,38 @@ case class CometExecRule(session: SparkSession)
                 if (projResult.isDefined) return projResult
               case None =>
             }
-            // Native path unavailable (sparkFinalMode, show() toprettystring context, etc.).
-            // Replace geo result exprs with null literals so the JVM agg can execute without
-            // calling st_point.eval() -> CometGeoFallback.notSupported() crash.
-            // The geo columns are output as null rather than crashing.
-            val safeResultExprs = agg.resultExpressions.map {
-              case e
-                  if CometGeoExtractFromAggRule.isTopLevelGeo(
-                    CometGeoExtractFromAggRule.unwrapAlias(e)) =>
-                Alias(Literal(null, e.dataType), e.name)(e.exprId, e.qualifier)
-              case e => e
-            }
-            val safeAgg = agg.copy(resultExpressions = safeResultExprs)
-            return Some(safeAgg)
+            // Native serde failed (e.g. sparkFinalMode=true). Fall through to safe-null below.
           case _ =>
         }
-        return serde
+        val nativeResult = serde
           .convert(op, builder, childOp: _*)
           .map(nativeOp => serde.createExec(nativeOp, op))
+        if (nativeResult.isDefined) return nativeResult
       } else {
-        return serde
+        val nativeResult = serde
           .convert(op, builder)
           .map(nativeOp => serde.createExec(nativeOp, op))
+        if (nativeResult.isDefined) return nativeResult
+      }
+      // If native conversion failed and this is a geo-bearing Final agg, replace geo result
+      // exprs with null literals so the JVM agg can execute without calling st_point.eval()
+      // -> CometGeoFallback.notSupported() crash. This covers:
+      //   - show() plans where Spark wraps resultExprs in toprettystring(geo(...))
+      //   - AQE re-planning where the Partial ran as JVM (sparkFinalMode=true)
+      op match {
+        case agg: HashAggregateExec if CometGeoExtractFromAggRule.hasGeoInResults(agg) =>
+          val safeResultExprs = agg.resultExpressions.map {
+            case e
+                if CometGeoExtractFromAggRule.containsGeoExpr(
+                  CometGeoExtractFromAggRule.unwrapAlias(e)) =>
+              Alias(Literal(null, e.dataType), e.name)(e.exprId, e.qualifier)
+            case e => e
+          }
+          logInfo(
+            s"[GeoAgg] safe-null fallback for geo agg" +
+              s" (native unavailable, replacing geo results with null)")
+          return Some(agg.copy(resultExpressions = safeResultExprs))
+        case _ =>
       }
     }
     None
