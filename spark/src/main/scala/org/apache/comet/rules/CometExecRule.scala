@@ -540,6 +540,13 @@ case class CometExecRule(session: SparkSession)
 
   private def normalizePlan(plan: SparkPlan): SparkPlan = {
     plan.transformUp {
+      // Rewrite ToPrettyString only in top-level ProjectExec (show() display layer).
+      // Do NOT rewrite inside HashAggregateExec.resultExpressions: those expressions are
+      // referenced by parent operators via AttributeReference with a fixed type (e.g. BinaryType
+      // for centroid). Rewriting ToPrettyString(centroid: Binary) -> StAsText would change the
+      // output type to StringType and break parent operators that expect BinaryType.
+      // The geo agg extraction (CometGeoExtractFromAggRule.stripGeoFromResults) handles the
+      // agg result rewrite correctly while preserving type contracts.
       case p: ProjectExec =>
         val newProjectList = p.projectList.map { e =>
           normalize(rewriteToPrettyString(e)).asInstanceOf[NamedExpression]
@@ -548,12 +555,6 @@ case class CometExecRule(session: SparkSession)
       case f: FilterExec =>
         val newCondition = normalize(f.condition)
         FilterExec(newCondition, f.child)
-      case agg: HashAggregateExec =>
-        val newResults = agg.resultExpressions.map { e =>
-          rewriteToPrettyString(e).asInstanceOf[NamedExpression]
-        }
-        if (newResults == agg.resultExpressions) agg
-        else agg.copy(resultExpressions = newResults)
     }
   }
 
