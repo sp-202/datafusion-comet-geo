@@ -20,13 +20,7 @@
 package org.apache.comet.rules
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.expressions.{
-  Alias,
-  Attribute,
-  Expression,
-  NamedExpression,
-  ToPrettyString
-}
+import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, Expression, NamedExpression, ToPrettyString}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.execution.aggregate.HashAggregateExec
