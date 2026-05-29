@@ -856,6 +856,10 @@ case class CometExecRule(session: SparkSession)
       case c if c.getTagValue(CometExecRule.SKIP_COMET_SHUFFLE_TAG).isDefined => false
       // Already a CometPlan - don't double-wrap.
       case _: CometPlan => false
+      // Geo Final aggregate: st_point has no JVM eval(). Wrapping it in CometSparkToColumnarExec
+      // would cause TungstenAggregationIterator to call st_point.eval() -> CometGeoFallback crash.
+      // These must go through convertToComet's geo extraction path, not the re-entry bridge.
+      case h: HashAggregateExec if CometGeoExtractFromAggRule.hasGeoInResults(h) => false
       case _ => true
     }
   }
