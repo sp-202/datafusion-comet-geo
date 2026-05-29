@@ -734,7 +734,9 @@ case class CometExecRule(session: SparkSession)
             // calling st_point.eval() -> CometGeoFallback.notSupported() crash.
             // The geo columns are output as null rather than crashing.
             val safeResultExprs = agg.resultExpressions.map {
-              case e if CometGeoExtractFromAggRule.containsGeoExpr(e) =>
+              case e
+                  if CometGeoExtractFromAggRule.isTopLevelGeo(
+                    CometGeoExtractFromAggRule.unwrapAlias(e)) =>
                 Alias(Literal(null, e.dataType), e.name)(e.exprId, e.qualifier)
               case e => e
             }
