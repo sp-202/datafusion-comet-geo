@@ -21,8 +21,8 @@ package org.apache.comet.expressions
 
 import org.apache.spark.sql.catalyst.FunctionIdentifier
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.expressions.{BinaryExpression, CodegenFallback, Expression, ExpressionInfo, NullIntolerant, UnaryExpression}
-import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, ExprCode}
+import org.apache.spark.sql.catalyst.expressions.{BinaryExpression, Expression, ExpressionInfo, NullIntolerant, UnaryExpression}
+import org.apache.spark.sql.catalyst.expressions.codegen.CodegenFallback
 import org.apache.spark.sql.types.{BinaryType, BooleanType, DataType, DoubleType, IntegerType, LongType, StringType}
 import org.apache.spark.unsafe.types.UTF8String
 
@@ -42,13 +42,6 @@ case class StContains(left: Expression, right: Expression)
   override def dataType: DataType = BooleanType
   override def nullSafeEval(g1: Any, g2: Any): Any =
     CometGeoFallback.contains(g1.asInstanceOf[Array[Byte]], g2.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      (g1, g2) =>
-        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$" +
-          s".contains((byte[]) $g1, (byte[]) $g2)")
   override protected def withNewChildrenInternal(
       newLeft: Expression,
       newRight: Expression): Expression = copy(left = newLeft, right = newRight)
@@ -62,13 +55,6 @@ case class StIntersects(left: Expression, right: Expression)
   override def dataType: DataType = BooleanType
   override def nullSafeEval(g1: Any, g2: Any): Any =
     CometGeoFallback.intersects(g1.asInstanceOf[Array[Byte]], g2.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      (g1, g2) =>
-        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$" +
-          s".intersects((byte[]) $g1, (byte[]) $g2)")
   override protected def withNewChildrenInternal(
       newLeft: Expression,
       newRight: Expression): Expression = copy(left = newLeft, right = newRight)
@@ -82,13 +68,6 @@ case class StWithin(left: Expression, right: Expression)
   override def dataType: DataType = BooleanType
   override def nullSafeEval(g1: Any, g2: Any): Any =
     CometGeoFallback.within(g1.asInstanceOf[Array[Byte]], g2.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      (g1, g2) =>
-        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$" +
-          s".within((byte[]) $g1, (byte[]) $g2)")
   override protected def withNewChildrenInternal(
       newLeft: Expression,
       newRight: Expression): Expression = copy(left = newLeft, right = newRight)
@@ -102,13 +81,6 @@ case class StDistance(left: Expression, right: Expression)
   override def dataType: DataType = DoubleType
   override def nullSafeEval(g1: Any, g2: Any): Any =
     CometGeoFallback.distance(g1.asInstanceOf[Array[Byte]], g2.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      (g1, g2) =>
-        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$" +
-          s".distance((byte[]) $g1, (byte[]) $g2)")
   override protected def withNewChildrenInternal(
       newLeft: Expression,
       newRight: Expression): Expression = copy(left = newLeft, right = newRight)
@@ -122,13 +94,6 @@ case class StUnion(left: Expression, right: Expression)
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g1: Any, g2: Any): Any =
     CometGeoFallback.union(g1.asInstanceOf[Array[Byte]], g2.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      (g1, g2) =>
-        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$" +
-          s".union((byte[]) $g1, (byte[]) $g2)")
   override protected def withNewChildrenInternal(
       newLeft: Expression,
       newRight: Expression): Expression = copy(left = newLeft, right = newRight)
@@ -142,13 +107,6 @@ case class StIntersection(left: Expression, right: Expression)
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g1: Any, g2: Any): Any =
     CometGeoFallback.intersection(g1.asInstanceOf[Array[Byte]], g2.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      (g1, g2) =>
-        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$" +
-          s".intersection((byte[]) $g1, (byte[]) $g2)")
   override protected def withNewChildrenInternal(
       newLeft: Expression,
       newRight: Expression): Expression = copy(left = newLeft, right = newRight)
@@ -163,13 +121,6 @@ case class StPoint(left: Expression, right: Expression)
   override def dataType: DataType = BinaryType
   override def nullSafeEval(x: Any, y: Any): Any =
     CometGeoFallback.makePoint(x.asInstanceOf[Double], y.asInstanceOf[Double])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      (x, y) =>
-        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$" +
-          s".makePoint((double) $x, (double) $y)")
   override protected def withNewChildrenInternal(
       newLeft: Expression,
       newRight: Expression): Expression = copy(left = newLeft, right = newRight)
@@ -185,11 +136,6 @@ case class StArea(child: Expression)
   override def dataType: DataType = DoubleType
   override def nullSafeEval(g: Any): Any =
     CometGeoFallback.area(g.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      g => s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$.area((byte[]) $g)")
   override protected def withNewChildInternal(newChild: Expression): Expression =
     copy(child = newChild)
 }
@@ -202,11 +148,6 @@ case class StCentroid(child: Expression)
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g: Any): Any =
     CometGeoFallback.centroid(g.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      g => s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$.centroid((byte[]) $g)")
   override protected def withNewChildInternal(newChild: Expression): Expression =
     copy(child = newChild)
 }
@@ -219,11 +160,6 @@ case class StLength(child: Expression)
   override def dataType: DataType = DoubleType
   override def nullSafeEval(g: Any): Any =
     CometGeoFallback.length(g.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      g => s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$.length((byte[]) $g)")
   override protected def withNewChildInternal(newChild: Expression): Expression =
     copy(child = newChild)
 }
@@ -236,11 +172,6 @@ case class StIsEmpty(child: Expression)
   override def dataType: DataType = BooleanType
   override def nullSafeEval(g: Any): Any =
     CometGeoFallback.isEmpty(g.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      g => s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$.isEmpty((byte[]) $g)")
   override protected def withNewChildInternal(newChild: Expression): Expression =
     copy(child = newChild)
 }
@@ -253,14 +184,6 @@ case class StGeometryType(child: Expression)
   override def dataType: DataType = StringType
   override def nullSafeEval(g: Any): Any =
     UTF8String.fromString(CometGeoFallback.geometryType(g.asInstanceOf[Array[Byte]]))
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      g =>
-        s"org.apache.spark.unsafe.types.UTF8String.fromString(" +
-          s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$" +
-          s".geometryType((byte[]) $g))")
   override protected def withNewChildInternal(newChild: Expression): Expression =
     copy(child = newChild)
 }
@@ -273,11 +196,6 @@ case class StNumPoints(child: Expression)
   override def dataType: DataType = LongType
   override def nullSafeEval(g: Any): Any =
     CometGeoFallback.numPoints(g.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      g => s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$.numPoints((byte[]) $g)")
   override protected def withNewChildInternal(newChild: Expression): Expression =
     copy(child = newChild)
 }
@@ -290,11 +208,6 @@ case class StX(child: Expression)
   override def dataType: DataType = DoubleType
   override def nullSafeEval(g: Any): Any =
     CometGeoFallback.stX(g.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      g => s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$.stX((byte[]) $g)")
   override protected def withNewChildInternal(newChild: Expression): Expression =
     copy(child = newChild)
 }
@@ -307,11 +220,6 @@ case class StY(child: Expression)
   override def dataType: DataType = DoubleType
   override def nullSafeEval(g: Any): Any =
     CometGeoFallback.stY(g.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      g => s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$.stY((byte[]) $g)")
   override protected def withNewChildInternal(newChild: Expression): Expression =
     copy(child = newChild)
 }
@@ -324,11 +232,6 @@ case class StEnvelope(child: Expression)
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g: Any): Any =
     CometGeoFallback.envelope(g.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      g => s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$.envelope((byte[]) $g)")
   override protected def withNewChildInternal(newChild: Expression): Expression =
     copy(child = newChild)
 }
@@ -341,11 +244,6 @@ case class StConvexHull(child: Expression)
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g: Any): Any =
     CometGeoFallback.convexHull(g.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      g => s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$.convexHull((byte[]) $g)")
   override protected def withNewChildInternal(newChild: Expression): Expression =
     copy(child = newChild)
 }
@@ -360,13 +258,6 @@ case class StSimplify(left: Expression, right: Expression)
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g: Any, t: Any): Any =
     CometGeoFallback.simplify(g.asInstanceOf[Array[Byte]], t.asInstanceOf[Double])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      (g, t) =>
-        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$" +
-          s".simplify((byte[]) $g, (double) $t)")
   override protected def withNewChildrenInternal(
       newLeft: Expression,
       newRight: Expression): Expression = copy(left = newLeft, right = newRight)
@@ -380,13 +271,6 @@ case class StBuffer(left: Expression, right: Expression)
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g: Any, d: Any): Any =
     CometGeoFallback.buffer(g.asInstanceOf[Array[Byte]], d.asInstanceOf[Double])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      (g, d) =>
-        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$" +
-          s".buffer((byte[]) $g, (double) $d)")
   override protected def withNewChildrenInternal(
       newLeft: Expression,
       newRight: Expression): Expression = copy(left = newLeft, right = newRight)
@@ -403,13 +287,6 @@ case class StGeomFromWkb(child: Expression)
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g: Any): Any =
     CometGeoFallback.geomFromWkb(g.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      g =>
-        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$" +
-          s".geomFromWkb((byte[]) $g)")
   override protected def withNewChildInternal(newChild: Expression): Expression =
     copy(child = newChild)
 }
@@ -422,8 +299,6 @@ case class StAsBinary(child: Expression)
   override def foldable: Boolean = false
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g: Any): Any = g.asInstanceOf[Array[Byte]]
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(ctx, ev, g => s"(byte[]) $g")
   override protected def withNewChildInternal(newChild: Expression): Expression =
     copy(child = newChild)
 }
@@ -437,13 +312,6 @@ case class StGeomFromWkt(child: Expression)
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g: Any): Any =
     CometGeoFallback.geomFromWkt(g.asInstanceOf[UTF8String].toString)
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      g =>
-        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$" +
-          s".geomFromWkt($g.toString())")
   override protected def withNewChildInternal(newChild: Expression): Expression =
     copy(child = newChild)
 }
@@ -457,13 +325,6 @@ case class StGeomFromGeoJson(child: Expression)
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g: Any): Any =
     CometGeoFallback.geomFromGeoJson(g.asInstanceOf[UTF8String].toString)
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      g =>
-        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$" +
-          s".geomFromGeoJson($g.toString())")
   override protected def withNewChildInternal(newChild: Expression): Expression =
     copy(child = newChild)
 }
@@ -491,7 +352,6 @@ case class StMakeEnvelope(xmin: Expression, ymin: Expression, xmax: Expression, 
         yv2.asInstanceOf[Double])
     }
   }
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode = ev
   override protected def withNewChildrenInternal(
       newChildren: IndexedSeq[Expression]): Expression =
     copy(
@@ -509,13 +369,6 @@ case class StMakeLine(left: Expression, right: Expression)
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g1: Any, g2: Any): Any =
     CometGeoFallback.makeLine(g1.asInstanceOf[Array[Byte]], g2.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      (g1, g2) =>
-        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$" +
-          s".makeLine((byte[]) $g1, (byte[]) $g2)")
   override protected def withNewChildrenInternal(
       newLeft: Expression,
       newRight: Expression): Expression = copy(left = newLeft, right = newRight)
@@ -532,13 +385,6 @@ case class StAsText(child: Expression)
   override def dataType: DataType = StringType
   override def nullSafeEval(g: Any): Any =
     UTF8String.fromString(CometGeoFallback.asText(g.asInstanceOf[Array[Byte]]))
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      g =>
-        s"org.apache.spark.unsafe.types.UTF8String.fromString(" +
-          s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$.asText((byte[]) $g))")
   override protected def withNewChildInternal(newChild: Expression): Expression =
     copy(child = newChild)
 }
@@ -552,13 +398,6 @@ case class StAsGeoJson(child: Expression)
   override def dataType: DataType = StringType
   override def nullSafeEval(g: Any): Any =
     UTF8String.fromString(CometGeoFallback.asGeoJson(g.asInstanceOf[Array[Byte]]))
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      g =>
-        s"org.apache.spark.unsafe.types.UTF8String.fromString(" +
-          s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$.asGeoJson((byte[]) $g))")
   override protected def withNewChildInternal(newChild: Expression): Expression =
     copy(child = newChild)
 }
@@ -573,13 +412,6 @@ case class StCovers(left: Expression, right: Expression)
   override def dataType: DataType = BooleanType
   override def nullSafeEval(g1: Any, g2: Any): Any =
     CometGeoFallback.covers(g1.asInstanceOf[Array[Byte]], g2.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      (g1, g2) =>
-        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$" +
-          s".covers((byte[]) $g1, (byte[]) $g2)")
   override protected def withNewChildrenInternal(
       newLeft: Expression,
       newRight: Expression): Expression = copy(left = newLeft, right = newRight)
@@ -593,13 +425,6 @@ case class StCoveredBy(left: Expression, right: Expression)
   override def dataType: DataType = BooleanType
   override def nullSafeEval(g1: Any, g2: Any): Any =
     CometGeoFallback.coveredBy(g1.asInstanceOf[Array[Byte]], g2.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      (g1, g2) =>
-        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$" +
-          s".coveredBy((byte[]) $g1, (byte[]) $g2)")
   override protected def withNewChildrenInternal(
       newLeft: Expression,
       newRight: Expression): Expression = copy(left = newLeft, right = newRight)
@@ -613,13 +438,6 @@ case class StEquals(left: Expression, right: Expression)
   override def dataType: DataType = BooleanType
   override def nullSafeEval(g1: Any, g2: Any): Any =
     CometGeoFallback.equals(g1.asInstanceOf[Array[Byte]], g2.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      (g1, g2) =>
-        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$" +
-          s".equals((byte[]) $g1, (byte[]) $g2)")
   override protected def withNewChildrenInternal(
       newLeft: Expression,
       newRight: Expression): Expression = copy(left = newLeft, right = newRight)
@@ -633,13 +451,6 @@ case class StTouches(left: Expression, right: Expression)
   override def dataType: DataType = BooleanType
   override def nullSafeEval(g1: Any, g2: Any): Any =
     CometGeoFallback.touches(g1.asInstanceOf[Array[Byte]], g2.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      (g1, g2) =>
-        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$" +
-          s".touches((byte[]) $g1, (byte[]) $g2)")
   override protected def withNewChildrenInternal(
       newLeft: Expression,
       newRight: Expression): Expression = copy(left = newLeft, right = newRight)
@@ -653,13 +464,6 @@ case class StCrosses(left: Expression, right: Expression)
   override def dataType: DataType = BooleanType
   override def nullSafeEval(g1: Any, g2: Any): Any =
     CometGeoFallback.crosses(g1.asInstanceOf[Array[Byte]], g2.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      (g1, g2) =>
-        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$" +
-          s".crosses((byte[]) $g1, (byte[]) $g2)")
   override protected def withNewChildrenInternal(
       newLeft: Expression,
       newRight: Expression): Expression = copy(left = newLeft, right = newRight)
@@ -673,13 +477,6 @@ case class StDisjoint(left: Expression, right: Expression)
   override def dataType: DataType = BooleanType
   override def nullSafeEval(g1: Any, g2: Any): Any =
     CometGeoFallback.disjoint(g1.asInstanceOf[Array[Byte]], g2.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      (g1, g2) =>
-        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$" +
-          s".disjoint((byte[]) $g1, (byte[]) $g2)")
   override protected def withNewChildrenInternal(
       newLeft: Expression,
       newRight: Expression): Expression = copy(left = newLeft, right = newRight)
@@ -693,13 +490,6 @@ case class StOverlaps(left: Expression, right: Expression)
   override def dataType: DataType = BooleanType
   override def nullSafeEval(g1: Any, g2: Any): Any =
     CometGeoFallback.overlaps(g1.asInstanceOf[Array[Byte]], g2.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      (g1, g2) =>
-        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$" +
-          s".overlaps((byte[]) $g1, (byte[]) $g2)")
   override protected def withNewChildrenInternal(
       newLeft: Expression,
       newRight: Expression): Expression = copy(left = newLeft, right = newRight)
@@ -715,13 +505,6 @@ case class StDistanceSphere(left: Expression, right: Expression)
   override def dataType: DataType = DoubleType
   override def nullSafeEval(g1: Any, g2: Any): Any =
     CometGeoFallback.distanceSphere(g1.asInstanceOf[Array[Byte]], g2.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      (g1, g2) =>
-        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$" +
-          s".distanceSphere((byte[]) $g1, (byte[]) $g2)")
   override protected def withNewChildrenInternal(
       newLeft: Expression,
       newRight: Expression): Expression = copy(left = newLeft, right = newRight)
@@ -735,11 +518,6 @@ case class StPerimeter(child: Expression)
   override def dataType: DataType = DoubleType
   override def nullSafeEval(g: Any): Any =
     CometGeoFallback.perimeter(g.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      g => s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$.perimeter((byte[]) $g)")
   override protected def withNewChildInternal(newChild: Expression): Expression =
     copy(child = newChild)
 }
@@ -752,13 +530,6 @@ case class StHausdorffDistance(left: Expression, right: Expression)
   override def dataType: DataType = DoubleType
   override def nullSafeEval(g1: Any, g2: Any): Any =
     CometGeoFallback.hausdorffDistance(g1.asInstanceOf[Array[Byte]], g2.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      (g1, g2) =>
-        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$" +
-          s".hausdorffDistance((byte[]) $g1, (byte[]) $g2)")
   override protected def withNewChildrenInternal(
       newLeft: Expression,
       newRight: Expression): Expression = copy(left = newLeft, right = newRight)
@@ -776,13 +547,6 @@ case class StSimplifyPreserveTopology(left: Expression, right: Expression)
     CometGeoFallback.simplifyPreserveTopology(
       g1.asInstanceOf[Array[Byte]],
       g2.asInstanceOf[Double])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      (g1, g2) =>
-        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$" +
-          s".simplifyPreserveTopology((byte[]) $g1, (double) $g2)")
   override protected def withNewChildrenInternal(
       newLeft: Expression,
       newRight: Expression): Expression = copy(left = newLeft, right = newRight)
@@ -796,13 +560,6 @@ case class StFlipCoordinates(child: Expression)
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g: Any): Any =
     CometGeoFallback.flipCoordinates(g.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      g =>
-        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$" +
-          s".flipCoordinates((byte[]) $g)")
   override protected def withNewChildInternal(newChild: Expression): Expression =
     copy(child = newChild)
 }
@@ -815,11 +572,6 @@ case class StBoundary(child: Expression)
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g: Any): Any =
     CometGeoFallback.boundary(g.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      g => s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$.boundary((byte[]) $g)")
   override protected def withNewChildInternal(newChild: Expression): Expression =
     copy(child = newChild)
 }
@@ -834,11 +586,6 @@ case class StIsValid(child: Expression)
   override def dataType: DataType = BooleanType
   override def nullSafeEval(g: Any): Any =
     CometGeoFallback.isValid(g.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      g => s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$.isValid((byte[]) $g)")
   override protected def withNewChildInternal(newChild: Expression): Expression =
     copy(child = newChild)
 }
@@ -851,11 +598,6 @@ case class StSrid(child: Expression)
   override def dataType: DataType = IntegerType
   override def nullSafeEval(g: Any): Any =
     CometGeoFallback.srid(g.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      g => s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$.srid((byte[]) $g)")
   override protected def withNewChildInternal(newChild: Expression): Expression =
     copy(child = newChild)
 }
@@ -868,11 +610,6 @@ case class StDimension(child: Expression)
   override def dataType: DataType = IntegerType
   override def nullSafeEval(g: Any): Any =
     CometGeoFallback.dimension(g.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      g => s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$.dimension((byte[]) $g)")
   override protected def withNewChildInternal(newChild: Expression): Expression =
     copy(child = newChild)
 }
@@ -885,13 +622,6 @@ case class StNumGeometries(child: Expression)
   override def dataType: DataType = IntegerType
   override def nullSafeEval(g: Any): Any =
     CometGeoFallback.numGeometries(g.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      g =>
-        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$" +
-          s".numGeometries((byte[]) $g)")
   override protected def withNewChildInternal(newChild: Expression): Expression =
     copy(child = newChild)
 }
@@ -904,11 +634,6 @@ case class StStartPoint(child: Expression)
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g: Any): Any =
     CometGeoFallback.startPoint(g.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      g => s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$.startPoint((byte[]) $g)")
   override protected def withNewChildInternal(newChild: Expression): Expression =
     copy(child = newChild)
 }
@@ -921,11 +646,6 @@ case class StEndPoint(child: Expression)
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g: Any): Any =
     CometGeoFallback.endPoint(g.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      g => s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$.endPoint((byte[]) $g)")
   override protected def withNewChildInternal(newChild: Expression): Expression =
     copy(child = newChild)
 }
@@ -938,11 +658,6 @@ case class StExteriorRing(child: Expression)
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g: Any): Any =
     CometGeoFallback.exteriorRing(g.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      g => s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$.exteriorRing((byte[]) $g)")
   override protected def withNewChildInternal(newChild: Expression): Expression =
     copy(child = newChild)
 }
@@ -955,13 +670,6 @@ case class StNumInteriorRings(child: Expression)
   override def dataType: DataType = IntegerType
   override def nullSafeEval(g: Any): Any =
     CometGeoFallback.numInteriorRings(g.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      g =>
-        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$" +
-          s".numInteriorRings((byte[]) $g)")
   override protected def withNewChildInternal(newChild: Expression): Expression =
     copy(child = newChild)
 }
@@ -987,7 +695,6 @@ case class StTranslate(geom: Expression, deltaX: Expression, deltaY: Expression)
         dy.asInstanceOf[Double])
     }
   }
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode = ev
   override protected def withNewChildrenInternal(
       newChildren: IndexedSeq[Expression]): Expression =
     copy(geom = newChildren(0), deltaX = newChildren(1), deltaY = newChildren(2))
@@ -1003,13 +710,6 @@ case class StDifference(left: Expression, right: Expression)
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g1: Any, g2: Any): Any =
     CometGeoFallback.difference(g1.asInstanceOf[Array[Byte]], g2.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      (g1, g2) =>
-        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$" +
-          s".difference((byte[]) $g1, (byte[]) $g2)")
   override protected def withNewChildrenInternal(
       newLeft: Expression,
       newRight: Expression): Expression = copy(left = newLeft, right = newRight)
@@ -1023,13 +723,6 @@ case class StSymDifference(left: Expression, right: Expression)
   override def dataType: DataType = BinaryType
   override def nullSafeEval(g1: Any, g2: Any): Any =
     CometGeoFallback.symDifference(g1.asInstanceOf[Array[Byte]], g2.asInstanceOf[Array[Byte]])
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
-    defineCodeGen(
-      ctx,
-      ev,
-      (g1, g2) =>
-        s"org.apache.comet.expressions.CometGeoFallback$$.MODULE$$" +
-          s".symDifference((byte[]) $g1, (byte[]) $g2)")
   override protected def withNewChildrenInternal(
       newLeft: Expression,
       newRight: Expression): Expression = copy(left = newLeft, right = newRight)
