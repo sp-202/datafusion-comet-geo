@@ -540,13 +540,6 @@ case class CometExecRule(session: SparkSession)
 
   private def normalizePlan(plan: SparkPlan): SparkPlan = {
     plan.transformUp {
-      // Rewrite ToPrettyString only in top-level ProjectExec (show() display layer).
-      // Do NOT rewrite inside HashAggregateExec.resultExpressions: those expressions are
-      // referenced by parent operators via AttributeReference with a fixed type (e.g. BinaryType
-      // for centroid). Rewriting ToPrettyString(centroid: Binary) -> StAsText would change the
-      // output type to StringType and break parent operators that expect BinaryType.
-      // The geo agg extraction (CometGeoExtractFromAggRule.stripGeoFromResults) handles the
-      // agg result rewrite correctly while preserving type contracts.
       case p: ProjectExec =>
         val newProjectList = p.projectList.map { e =>
           normalize(rewriteToPrettyString(e)).asInstanceOf[NamedExpression]
@@ -555,7 +548,24 @@ case class CometExecRule(session: SparkSession)
       case f: FilterExec =>
         val newCondition = normalize(f.condition)
         FilterExec(newCondition, f.child)
+      // Only rewrite ToPrettyString in a HashAggregateExec whose resultExpressions already
+      // contain ToPrettyString wrappers. Spark only adds ToPrettyString on the outermost
+      // display agg (show() context). Inner aggs referenced by a parent agg do NOT have
+      // ToPrettyString; rewriting them would change output types (e.g. BinaryType centroid ->
+      // StringType) and break parent operators that reference them by the original type.
+      case agg: HashAggregateExec
+          if agg.resultExpressions.exists(e => containsToPrettyString(e)) =>
+        val newResults = agg.resultExpressions.map { e =>
+          rewriteToPrettyString(e).asInstanceOf[NamedExpression]
+        }
+        if (newResults == agg.resultExpressions) agg
+        else agg.copy(resultExpressions = newResults)
     }
+  }
+
+  private def containsToPrettyString(expr: Expression): Boolean = expr match {
+    case _: ToPrettyString => true
+    case _ => expr.children.exists(containsToPrettyString)
   }
 
   // Replace ToPrettyString wrappers before native serde:
