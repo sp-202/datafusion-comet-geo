@@ -331,6 +331,15 @@ case class CometExecRule(session: SparkSession)
       case s @ ShuffleQueryStageExec(_, ReusedExchangeExec(_, _: CometShuffleExchangeExec), _) =>
         convertToComet(s, CometExchangeSink).getOrElse(s)
 
+      // For the final AQE re-plan: AQEShuffleReadExec wraps a ShuffleQueryStageExec that
+      // transformUp has already converted to CometExchangeSink (a CometNativeExec). Convert the
+      // AQEShuffleReadExec itself to a CometExchangeSink (as a native leaf) so that operators above
+      // it (e.g. a geo-bearing HashAggregateExec) see an all-native child and proceed through the
+      // normal convertToComet geo-extraction path. foreachUntilCometInput already treats
+      // AQEShuffleReadExec as a native input source so this is safe at execution time.
+      case r: AQEShuffleReadExec if r.child.isInstanceOf[CometNativeExec] =>
+        convertToComet(r, CometExchangeSink).getOrElse(r)
+
       case s: ShuffleExchangeExec if shouldSkipCometShuffle(s) =>
         s
 
