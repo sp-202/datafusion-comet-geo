@@ -688,6 +688,14 @@ case class CometExecRule(session: SparkSession)
   /** Convert a Spark plan to a Comet plan using the specified serde handler */
   private def convertToComet(op: SparkPlan, handler: CometOperatorSerde[_]): Option[SparkPlan] = {
     val serde = handler.asInstanceOf[CometOperatorSerde[SparkPlan]]
+    op match {
+      case h: HashAggregateExec if CometGeoExtractFromAggRule.hasGeoInResults(h) =>
+        val childNative = h.children.forall(_.isInstanceOf[CometNativeExec])
+        logInfo(
+          s"[GeoEntry] convertToComet geo agg handler=${handler.getClass.getSimpleName}" +
+            s" childNative=$childNative child=${h.children.head.getClass.getSimpleName}")
+      case _ =>
+    }
     if (isOperatorEnabled(serde, op)) {
       // For operators that require native children (like writes), check if all data-producing
       // children are CometNativeExec. This prevents runtime failures when the native operator
