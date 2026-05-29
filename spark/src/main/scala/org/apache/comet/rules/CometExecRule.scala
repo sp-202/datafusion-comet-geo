@@ -401,9 +401,13 @@ case class CometExecRule(session: SparkSession)
                     if p.projectList.exists(e =>
                       CometGeoExtractFromAggRule.containsGeoExpr(
                         CometGeoExtractFromAggRule.unwrapAlias(e))) =>
+                  val exprResults = p.projectList.map { e =>
+                    val r = QueryPlanSerde.exprToProto(e, p.child.output)
+                    s"${e.name}=${r.isDefined}(${e.getClass.getSimpleName})"
+                  }
                   logInfo(
                     s"[GeoProjConvert] result=${result.isDefined}" +
-                      s" exprs=${p.projectList.map(_.getClass.getSimpleName).mkString(",")}")
+                      s" exprs=${exprResults.mkString(",")}")
                 case _ =>
               }
               // Pass the bridged plan; fall back to geoRewrittenOp (not the original op)
