@@ -47,9 +47,18 @@ import org.apache.comet.expressions.CometGeoExpression
  */
 case class CometGeoExtractFromAggRule(session: SparkSession) extends Rule[SparkPlan] {
 
-  override def apply(plan: SparkPlan): SparkPlan = plan.transformUp {
-    case agg: HashAggregateExec if hasGeoInResults(agg) =>
-      extractGeoFromResults(agg)
+  override def apply(plan: SparkPlan): SparkPlan = {
+    plan.foreach {
+      case agg: HashAggregateExec =>
+        System.err.println(
+          s"[GeoExtract] HashAggregateExec modes=${agg.aggregateExpressions.map(_.mode).distinct}" +
+            s" resultExprs=${agg.resultExpressions.map(_.getClass.getSimpleName + ":" + _)}")
+      case _ =>
+    }
+    plan.transformUp {
+      case agg: HashAggregateExec if hasGeoInResults(agg) =>
+        extractGeoFromResults(agg)
+    }
   }
 
   private def hasGeoInResults(agg: HashAggregateExec): Boolean =
