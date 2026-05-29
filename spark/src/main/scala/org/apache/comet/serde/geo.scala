@@ -133,15 +133,6 @@ private[serde] class CometGeoScalarFunc(funcName: String)
       inputs: Seq[Attribute],
       binding: Boolean): Option[Expr] = {
     val childExprs = expr.children.map(exprToProtoInternal(_, inputs, binding))
-    if (funcName == "st_astext" || funcName == "st_point") {
-      val childTypes = expr.children.map(c => s"${c.getClass.getSimpleName}:${c.dataType}")
-      val inputNames = inputs.map(a => s"${a.name}:${a.dataType}").mkString(",")
-      // scalastyle:off println
-      System.err.println(
-        s"[GeoSerde] $funcName children=${childTypes.mkString(",")} " +
-          s"inputs=[$inputNames] childDefined=${childExprs.map(_.isDefined).mkString(",")}")
-      // scalastyle:on println
-    }
     val optExpr = scalarFunctionExprToProto(funcName, childExprs: _*)
     optExprWithInfo(optExpr, expr, expr.children: _*)
   }

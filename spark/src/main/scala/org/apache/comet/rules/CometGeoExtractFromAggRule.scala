@@ -24,6 +24,7 @@ import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, Expression, 
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.execution.aggregate.HashAggregateExec
+import org.apache.spark.sql.types.BinaryType
 
 import org.apache.comet.expressions.{CometGeoExpression, StAsText}
 
@@ -125,7 +126,9 @@ object CometGeoExtractFromAggRule {
     replacePrettyGeoToAsText(expr)
 
   def replacePrettyGeoToAsText(expr: Expression): Expression = expr match {
-    case ToPrettyString(child, _) if containsGeoExpr(child) => StAsText(child)
+    case ToPrettyString(child, _)
+        if containsGeoExpr(child) && child.dataType == BinaryType =>
+      StAsText(child)
     case other => other.mapChildren(replacePrettyGeoToAsText)
   }
 

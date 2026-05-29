@@ -564,7 +564,8 @@ case class CometExecRule(session: SparkSession)
   // types throughout, avoiding type mismatches in geo function inputs.
   private def rewriteToPrettyString(expr: Expression): Expression =
     expr.transformUp {
-      case ToPrettyString(child, _) if CometGeoExtractFromAggRule.containsGeoExpr(child) =>
+      case ToPrettyString(child, _)
+          if CometGeoExtractFromAggRule.containsGeoExpr(child) && child.dataType == BinaryType =>
         org.apache.comet.expressions.StAsText(child)
       case ToPrettyString(child, _) =>
         Cast(child, StringType)
