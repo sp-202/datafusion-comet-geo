@@ -224,28 +224,20 @@ case class CometExecRule(session: SparkSession)
    *
    * Here are a few examples:
    *
-   * Scan ======> CometScan
-   * \| | Filter CometFilter
-   * \| | HashAggregate CometHashAggregate
-   * \| | Exchange CometExchange
-   * \| | HashAggregate CometHashAggregate
-   * \| | UnsupportedOperator UnsupportedOperator
+   * Scan ======> CometScan \| | Filter CometFilter \| | HashAggregate CometHashAggregate \| |
+   * Exchange CometExchange \| | HashAggregate CometHashAggregate \| | UnsupportedOperator
+   * UnsupportedOperator
    *
    * Native execution doesn't necessarily have to start from `CometScan`:
    *
-   * Scan =======> CometScan
-   * \| | UnsupportedOperator UnsupportedOperator
-   * \| | HashAggregate HashAggregate
-   * \| | Exchange CometExchange
-   * \| | HashAggregate CometHashAggregate
-   * \| | UnsupportedOperator UnsupportedOperator
+   * Scan =======> CometScan \| | UnsupportedOperator UnsupportedOperator \| | HashAggregate
+   * HashAggregate \| | Exchange CometExchange \| | HashAggregate CometHashAggregate \| |
+   * UnsupportedOperator UnsupportedOperator
    *
    * A sink can also be Comet operators other than `CometExchange`, for instance `CometUnion`:
    *
-   * Scan Scan =======> CometScan CometScan
-   * \| | | | Filter Filter CometFilter CometFilter
-   * \| | | | Union CometUnion
-   * \| | Project CometProject
+   * Scan Scan =======> CometScan CometScan \| | | | Filter Filter CometFilter CometFilter \| | |
+   * \| Union CometUnion \| | Project CometProject
    */
   // spotless:on
   private def transform(plan: SparkPlan): SparkPlan = {
@@ -701,6 +693,21 @@ case class CometExecRule(session: SparkSession)
       if (op.children.nonEmpty && op.children.forall(_.isInstanceOf[CometNativeExec])) {
         val childOp = op.children.map(_.asInstanceOf[CometNativeExec].nativeOp)
         childOp.foreach(builder.addChildren)
+        // If a Final HashAggregateExec has geo expressions in resultExpressions, strip them
+        // before serde (geo cannot be serialized against aggregateAttributes) and wrap the
+        // resulting CometNativeExec in a ProjectExec that re-adds the geo exprs above it.
+        op match {
+          case agg: HashAggregateExec if CometGeoExtractFromAggRule.hasGeoInResults(agg) =>
+            val (stripped, wrap) = CometGeoExtractFromAggRule.stripGeoFromResults(agg)
+            val strippedBuilder =
+              OperatorOuterClass.Operator.newBuilder().setPlanId(stripped.id)
+            childOp.foreach(strippedBuilder.addChildren)
+            val aggSerde = serde.asInstanceOf[CometOperatorSerde[HashAggregateExec]]
+            return aggSerde
+              .convert(stripped, strippedBuilder, childOp: _*)
+              .map(nativeOp => wrap(aggSerde.createExec(nativeOp, stripped)))
+          case _ =>
+        }
         return serde
           .convert(op, builder, childOp: _*)
           .map(nativeOp => serde.createExec(nativeOp, op))

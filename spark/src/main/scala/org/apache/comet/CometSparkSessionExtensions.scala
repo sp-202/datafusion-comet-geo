@@ -34,7 +34,7 @@ import org.apache.spark.sql.internal.SQLConf
 import org.apache.comet.CometConf._
 import org.apache.comet.expressions.GeoExpressions
 import org.apache.comet.parquet.GeoParquetFunctions
-import org.apache.comet.rules.{CometColumnarRule, CometExecRule, CometGeoExtractFromAggRule, CometGeoParquetRule, CometGeoPreAggregateRule, CometPlanAdaptiveDynamicPruningFilters, CometReuseSubquery, CometScanRule, CometSpark34AqeDppFallbackRule, EliminateRedundantTransitions}
+import org.apache.comet.rules.{CometColumnarRule, CometExecRule, CometGeoParquetRule, CometGeoPreAggregateRule, CometPlanAdaptiveDynamicPruningFilters, CometReuseSubquery, CometScanRule, CometSpark34AqeDppFallbackRule, EliminateRedundantTransitions}
 import org.apache.comet.shims.ShimCometSparkSessionExtensions
 
 /**
@@ -166,16 +166,7 @@ class CometSparkSessionExtensions
   }
 
   case class CometExecColumnar(session: SparkSession) extends ColumnarRule {
-    override def preColumnarTransitions: Rule[SparkPlan] = new Rule[SparkPlan] {
-      override val ruleName: String = "CometPreColumnarTransitions"
-      override def apply(plan: SparkPlan): SparkPlan = {
-        // Extract geo from HashAggregateExec.resultExpressions BEFORE CometExecRule converts
-        // HashAggregateExec -> CometHashAggregateExec. After extraction the new ProjectExec
-        // above the aggregate is then converted to CometProject by CometExecRule.
-        val afterGeoExtract = CometGeoExtractFromAggRule(session).apply(plan)
-        CometExecRule(session).apply(afterGeoExtract)
-      }
-    }
+    override def preColumnarTransitions: Rule[SparkPlan] = CometExecRule(session)
 
     override def postColumnarTransitions: Rule[SparkPlan] = new Rule[SparkPlan] {
       override val ruleName: String = "CometPostColumnarTransitions"
