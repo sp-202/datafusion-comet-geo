@@ -77,10 +77,21 @@ object CometGeoExtractFromAggRule {
     val strippedPlainExprs = plainExprs.map(stripToPrettyString)
     val strippedAgg = agg.copy(resultExpressions = strippedPlainExprs)
 
-    // Build substitution: alias.child (e.g. avg(lon)#378) -> alias.toAttribute (avg_lon#374)
-    val subst: Map[Expression, Attribute] = strippedPlainExprs.collect { case a: Alias =>
-      a.child -> a.toAttribute
-    }.toMap
+    // Build substitution map with two kinds of entries:
+    //   1. stripped alias.child -> stripped alias.toAttribute  (standard path)
+    //   2. orig alias.toAttribute -> inner attr  (toprettystring path: when show() wraps
+    //      plain exprs in ToPrettyString(innerAttr), geo exprs reference the wrapped output
+    //      attr #479 StringType; we remap it to innerAttr DoubleType so st_point gets doubles)
+    val subst: Map[Expression, Attribute] = {
+      val fromChild =
+        strippedPlainExprs.collect { case a: Alias => a.child -> a.toAttribute }
+      val fromWrapped = plainExprs.zip(strippedPlainExprs).collect {
+        case (orig: Alias, stripped: Alias) if stripped.child.isInstanceOf[Attribute] =>
+          // orig was Alias(ToPrettyString(innerAttr), name): map orig.toAttribute -> innerAttr
+          orig.toAttribute -> stripped.child.asInstanceOf[Attribute]
+      }
+      (fromChild ++ fromWrapped).toMap
+    }
 
     val rewrittenGeoExprs: Seq[NamedExpression] = geoExprs.map { e =>
       val substituted = substituteRefs(e, subst)
