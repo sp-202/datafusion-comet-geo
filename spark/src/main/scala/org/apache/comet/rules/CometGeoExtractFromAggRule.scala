@@ -22,13 +22,13 @@ package org.apache.comet.rules
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.{Alias, Expression, NamedExpression}
 import org.apache.spark.sql.catalyst.rules.Rule
-import org.apache.spark.sql.execution.{ProjectExec, SparkPlan}
+import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.execution.aggregate.HashAggregateExec
 
 import org.apache.comet.expressions.CometGeoExpression
 
 /**
- * Physical plan rule and helper for extracting geo expressions out of HashAggregateExec
+ * Physical plan rule helper for extracting geo expressions out of HashAggregateExec
  * resultExpressions.
  *
  * When a query like `SELECT category, st_point(avg(lon), avg(lat)) FROM pts GROUP BY category`
@@ -38,16 +38,12 @@ import org.apache.comet.expressions.CometGeoExpression
  * avg_lon_attr is a final output attribute, not a buffer attribute, so serialization fails and
  * the entire aggregate falls back to JVM.
  *
- * Fix: strip geo expressions from resultExpressions before serde, inject a ProjectExec above the
- * aggregate that re-applies the geo expressions to the plain output attributes.
+ * Fix (in CometExecRule.convertToComet): strip geo expressions from resultExpressions before
+ * serde, convert the stripped aggregate natively, then build a CometProjectExec above it that
+ * re-applies the geo exprs bound against the stripped agg's output attributes.
  */
 case class CometGeoExtractFromAggRule(session: SparkSession) extends Rule[SparkPlan] {
-
-  override def apply(plan: SparkPlan): SparkPlan = plan.transformUp {
-    case agg: HashAggregateExec if CometGeoExtractFromAggRule.hasGeoInResults(agg) =>
-      val (stripped, wrap) = CometGeoExtractFromAggRule.stripGeoFromResults(agg)
-      wrap(stripped)
-  }
+  override def apply(plan: SparkPlan): SparkPlan = plan
 }
 
 object CometGeoExtractFromAggRule {
@@ -58,24 +54,20 @@ object CometGeoExtractFromAggRule {
   /**
    * Split resultExpressions into plain and geo-carrying. Returns:
    *   - a copy of the aggregate with only plain resultExpressions
-   *   - a function that wraps any SparkPlan in a ProjectExec re-applying the geo exprs
+   *   - the full project list (plain attrs ++ geo exprs) for the CometProjectExec above it
    *
    * The geo exprs in resultExpressions already reference the agg's final output Attributes (Spark
-   * resolved avg(lon) -> avg_lon_attr during physical planning), so they are safe to use directly
-   * in the outer ProjectExec.
+   * resolved avg(lon) -> avg_lon_attr during physical planning), so they bind correctly against
+   * stripped.output when building the outer CometProjectExec.
    */
-  def stripGeoFromResults(agg: HashAggregateExec): (HashAggregateExec, SparkPlan => SparkPlan) = {
+  def stripGeoFromResults(agg: HashAggregateExec): (HashAggregateExec, Seq[NamedExpression]) = {
     val (geoExprs, plainExprs) =
       agg.resultExpressions.partition(e => containsGeo(unwrapAlias(e)))
 
     val strippedAgg = agg.copy(resultExpressions = plainExprs)
+    val geoProjectList: Seq[NamedExpression] = plainExprs.map(_.toAttribute) ++ geoExprs
 
-    val wrap: SparkPlan => SparkPlan = { child =>
-      val plainAttrs: Seq[NamedExpression] = plainExprs.map(_.toAttribute)
-      ProjectExec(plainAttrs ++ geoExprs, child)
-    }
-
-    (strippedAgg, wrap)
+    (strippedAgg, geoProjectList)
   }
 
   private def unwrapAlias(e: NamedExpression): Expression = e match {

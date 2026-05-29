@@ -694,18 +694,31 @@ case class CometExecRule(session: SparkSession)
         val childOp = op.children.map(_.asInstanceOf[CometNativeExec].nativeOp)
         childOp.foreach(builder.addChildren)
         // If a Final HashAggregateExec has geo expressions in resultExpressions, strip them
-        // before serde (geo cannot be serialized against aggregateAttributes) and wrap the
-        // resulting CometNativeExec in a ProjectExec that re-adds the geo exprs above it.
+        // before serde (geo cannot be serialized against aggregateAttributes), convert the
+        // stripped aggregate natively, then build a CometProjectExec above it that re-applies
+        // the geo exprs. The geo exprs reference the stripped agg's final output attributes,
+        // which are available in cometAgg.output, so exprToProto can serialize them natively.
         op match {
           case agg: HashAggregateExec if CometGeoExtractFromAggRule.hasGeoInResults(agg) =>
-            val (stripped, wrap) = CometGeoExtractFromAggRule.stripGeoFromResults(agg)
+            val (stripped, geoProjectList) =
+              CometGeoExtractFromAggRule.stripGeoFromResults(agg)
             val strippedBuilder =
               OperatorOuterClass.Operator.newBuilder().setPlanId(stripped.id)
             childOp.foreach(strippedBuilder.addChildren)
             val aggSerde = serde.asInstanceOf[CometOperatorSerde[HashAggregateExec]]
             return aggSerde
               .convert(stripped, strippedBuilder, childOp: _*)
-              .map(nativeOp => wrap(aggSerde.createExec(nativeOp, stripped)))
+              .flatMap { aggNativeOp =>
+                val cometAgg = aggSerde.createExec(aggNativeOp, stripped)
+                // Build a ProjectExec wrapping the native agg so CometProjectExec.convert
+                // can serialize geo exprs against the agg's output attributes.
+                val projExec = ProjectExec(geoProjectList, cometAgg)
+                val projBuilder =
+                  OperatorOuterClass.Operator.newBuilder().setPlanId(projExec.id)
+                CometProjectExec
+                  .convert(projExec, projBuilder, aggNativeOp)
+                  .map(projNativeOp => CometProjectExec.createExec(projNativeOp, projExec))
+              }
           case _ =>
         }
         return serde
