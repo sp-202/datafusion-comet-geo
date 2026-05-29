@@ -19,6 +19,7 @@
 
 package org.apache.comet.rules
 
+import org.apache.spark.internal.Logging
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.{Alias, Expression, NamedExpression}
 import org.apache.spark.sql.catalyst.rules.Rule
@@ -45,12 +46,14 @@ import org.apache.comet.expressions.CometGeoExpression
  * transitions are inserted. The newly injected ProjectExec will be seen by CometExecRule on the
  * next AQE re-optimization pass and converted to CometProject at that point.
  */
-case class CometGeoExtractFromAggRule(session: SparkSession) extends Rule[SparkPlan] {
+case class CometGeoExtractFromAggRule(session: SparkSession)
+    extends Rule[SparkPlan]
+    with Logging {
 
   override def apply(plan: SparkPlan): SparkPlan = {
     plan.foreach {
       case agg: HashAggregateExec =>
-        System.err.println(
+        logInfo(
           s"[GeoExtract] HashAggregateExec modes=${agg.aggregateExpressions.map(_.mode).distinct}" +
             s" resultExprs=${agg.resultExpressions.map(e => e.getClass.getSimpleName + ":" + e)}")
       case _ =>
