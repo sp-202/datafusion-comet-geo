@@ -379,29 +379,9 @@ case class CometExecRule(session: SparkSession)
           case _ =>
         }
 
-        // ProjectExec carrying geo: rewrite ALL ToPrettyString wrappers before serde.
-        //   - ToPrettyString(geoExpr)  -> StAsText(geoExpr)  (WKT string natively)
-        //   - ToPrettyString(plainExpr) -> Cast(plainExpr, StringType)  (standard cast)
-        // ToPrettyString is a Spark-internal show() helper that DataFusion does not know
-        // about; leaving it in the projectList causes garbled output for non-geo columns.
-        val geoRewrittenOp: SparkPlan = op match {
-          case proj: ProjectExec
-              if proj.projectList.exists(e =>
-                CometGeoExtractFromAggRule.containsGeoExpr(
-                  CometGeoExtractFromAggRule.unwrapAlias(e))) =>
-            val rewritten = proj.projectList.map { ne =>
-              val replaced = ne.transformUp {
-                case ToPrettyString(child, _)
-                    if CometGeoExtractFromAggRule.containsGeoExpr(child) =>
-                  org.apache.comet.expressions.StAsText(child)
-                case ToPrettyString(child, _) =>
-                  Cast(child, StringType)
-              }
-              replaced.asInstanceOf[NamedExpression]
-            }
-            if (rewritten != proj.projectList) proj.copy(projectList = rewritten) else proj
-          case other => other
-        }
+        // normalizePlan already rewrote ToPrettyString -> StAsText/Cast globally.
+        // Detect geo ProjectExec so wrapJvmChildrenIfSafe and convertToComet handle it.
+        val geoRewrittenOp: SparkPlan = op
 
         val opWithBridgedChildren = wrapJvmChildrenIfSafe(geoRewrittenOp)
 
@@ -561,13 +541,35 @@ case class CometExecRule(session: SparkSession)
   private def normalizePlan(plan: SparkPlan): SparkPlan = {
     plan.transformUp {
       case p: ProjectExec =>
-        val newProjectList = p.projectList.map(normalize(_).asInstanceOf[NamedExpression])
+        val newProjectList = p.projectList.map { e =>
+          normalize(rewriteToPrettyString(e)).asInstanceOf[NamedExpression]
+        }
         ProjectExec(newProjectList, p.child)
       case f: FilterExec =>
         val newCondition = normalize(f.condition)
         FilterExec(newCondition, f.child)
+      case agg: HashAggregateExec =>
+        val newResults = agg.resultExpressions.map { e =>
+          rewriteToPrettyString(e).asInstanceOf[NamedExpression]
+        }
+        if (newResults == agg.resultExpressions) agg
+        else agg.copy(resultExpressions = newResults)
     }
   }
+
+  // Replace ToPrettyString wrappers before native serde:
+  //   ToPrettyString(geoExpr) -> StAsText(geoExpr)  (WKT string natively for show())
+  //   ToPrettyString(other)   -> Cast(other, StringType)  (standard string cast)
+  // This runs in normalizePlan before AQE so that show()-style plans produce the right
+  // types throughout, avoiding type mismatches in geo function inputs.
+  private def rewriteToPrettyString(expr: Expression): Expression =
+    expr.transformUp {
+      case ToPrettyString(child, _)
+          if CometGeoExtractFromAggRule.containsGeoExpr(child) =>
+        org.apache.comet.expressions.StAsText(child)
+      case ToPrettyString(child, _) =>
+        Cast(child, StringType)
+    }
 
   // Spark will normalize NaN and zero for floating point numbers for several cases.
   // See `NormalizeFloatingNumbers` optimization rule in Spark.
