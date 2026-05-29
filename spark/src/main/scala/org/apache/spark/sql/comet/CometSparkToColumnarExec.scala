@@ -19,8 +19,6 @@
 
 package org.apache.spark.sql.comet
 
-import scala.collection.mutable.ListBuffer
-
 import org.apache.spark.TaskContext
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.rdd.RDD
@@ -154,11 +152,4 @@ object CometSparkToColumnarExec extends CometSink[SparkPlan] with DataTypeSuppor
     CometScanWrapper(nativeOp, CometSparkToColumnarExec(op))
   }
 
-  override def isTypeSupported(
-      dt: DataType,
-      name: String,
-      fallbackReasons: ListBuffer[String]): Boolean = dt match {
-    case _: ArrayType | _: MapType => false
-    case _ => super.isTypeSupported(dt, name, fallbackReasons)
-  }
 }

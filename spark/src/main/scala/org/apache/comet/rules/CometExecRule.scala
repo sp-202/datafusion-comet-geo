@@ -785,7 +785,7 @@ case class CometExecRule(session: SparkSession)
    *   - is already a `CometNativeExec`
    *   - is a broadcast/shuffle/AQE exchange operator (different data protocol)
    *   - carries a `COMET_UNSAFE_PARTIAL` or `SKIP_COMET_SHUFFLE_TAG` tag
-   *   - has a schema unsupported by `CometSparkToColumnarExec` (e.g. `ArrayType`)
+   *   - has a schema unsupported by `CometSparkToColumnarExec` (e.g. `CalendarIntervalType`)
    *
    * If wrapping fails (e.g. unsupported schema), the original child is left in place, so
    * the parent will not have all-native children and conversion will be skipped safely.
@@ -816,8 +816,8 @@ case class CometExecRule(session: SparkSession)
    * `CometSparkToColumnarExec` for re-entry into native execution.
    */
   private def canWrapWithR2C(child: SparkPlan): Boolean = {
-    // Validate schema first — rejects ArrayType, MapType, CalendarIntervalType etc.
-    // This also catches collect_set / collect_list intermediate buffer arrays.
+    // Validate schema first rejects CalendarIntervalType, UserDefinedType, etc.
+    // collect_set / collect_list internal buffer arrays are caught by COMET_UNSAFE_PARTIAL above.
     val fallbackReasons = new ListBuffer[String]()
     if (!CometSparkToColumnarExec.isSchemaSupported(child.schema, fallbackReasons)) {
       return false
