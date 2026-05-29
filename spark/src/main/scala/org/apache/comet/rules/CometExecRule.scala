@@ -999,10 +999,17 @@ case class CometExecRule(session: SparkSession)
 
     // doConvert only checks resultExpressions in Final mode when aggregate expressions exist
     // (Partial emits the buffer directly). Mirror that here to avoid false negatives.
+    // Geo expressions in resultExpressions are handled by the geo extraction path in
+    // convertToComet (stripped before serde, then re-applied as CometProjectExec above the
+    // aggregate), so a Final agg is convertible even when geo exprs are present.
     if (expectedMode == Final) {
-      val attributes =
-        groupingExpressions.map(_.toAttribute) ++ agg.aggregateAttributes
-      agg.resultExpressions.forall(e => QueryPlanSerde.exprToProto(e, attributes).isDefined)
+      agg match {
+        case h: HashAggregateExec if CometGeoExtractFromAggRule.hasGeoInResults(h) => true
+        case _ =>
+          val attributes =
+            groupingExpressions.map(_.toAttribute) ++ agg.aggregateAttributes
+          agg.resultExpressions.forall(e => QueryPlanSerde.exprToProto(e, attributes).isDefined)
+      }
     } else {
       true
     }
