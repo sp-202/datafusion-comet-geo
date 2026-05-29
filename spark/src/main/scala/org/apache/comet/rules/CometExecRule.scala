@@ -51,6 +51,7 @@ import org.apache.spark.sql.types._
 
 import org.apache.comet.{CometConf, CometExplainInfo, ExtendedExplainInfo}
 import org.apache.comet.CometConf.{COMET_SPARK_TO_ARROW_ENABLED, COMET_SPARK_TO_ARROW_SUPPORTED_OPERATOR_LIST}
+import org.apache.comet.expressions.CometGeoExpression
 import org.apache.comet.CometSparkSessionExtensions._
 import org.apache.comet.rules.CometExecRule.allExecs
 import org.apache.comet.serde._
@@ -364,7 +365,7 @@ case class CometExecRule(session: SparkSession)
         // path) or apply the safe-null fallback to prevent CometGeoFallback.notSupported().
         op match {
           case agg: HashAggregateExec if CometGeoExtractFromAggRule.hasGeoInResults(agg) =>
-            return convertToComet(agg, CometHashAggregateExec).getOrElse(op)
+            return convertToComet(agg, CometHashAggregateExec).getOrElse(safeGeoFallback(op))
           case _ =>
         }
 
@@ -410,20 +411,24 @@ case class CometExecRule(session: SparkSession)
                       s" exprs=${exprResults.mkString(",")}")
                 case _ =>
               }
-              // Pass the bridged plan; fall back to geoRewrittenOp (not the original op)
-              // so that any ToPrettyString(geo) rewrite is preserved even on native failure.
-              return result.getOrElse(geoRewrittenOp)
+              // If native conversion succeeded, use it. Otherwise for a geo-bearing ProjectExec
+              // that falls through to JVM, replace geo exprs with safe literals so JVM codegen
+              // doesn't call geo.eval() -> CometGeoFallback.notSupported() crash.
+              return result.getOrElse(safeGeoFallback(geoRewrittenOp))
             case _ =>
           }
         }
 
-        geoRewrittenOp match {
+        // children were not all-native (e.g. Window above AQEShuffleRead): still must not let
+        // geo exprs reach JVM codegen. Apply safe-literal fallback for any geo ProjectExec.
+        val safeOp = safeGeoFallback(geoRewrittenOp)
+        safeOp match {
           case _: CometPlan | _: AQEShuffleReadExec | _: BroadcastExchangeExec |
               _: BroadcastQueryStageExec | _: AdaptiveSparkPlanExec | _: ExecutedCommandExec |
               _: V2CommandExec =>
             // Some execs should never be replaced. We include
             // these cases specially here so we do not add a misleading 'info' message
-            geoRewrittenOp
+            safeOp
           case _ =>
             // The operator was not converted to a Comet plan. Possible reasons:
             // 1. Comet does not support this operator.
@@ -431,10 +436,10 @@ case class CometExecRule(session: SparkSession)
             //    It should already be tagged with fallback reasons.
             // 3. Some children could not be bridged (unsafe type, tagged, excluded node).
             if (opWithBridgedChildren.children.forall(_.isInstanceOf[CometNativeExec])
-              && !hasExplainInfo(geoRewrittenOp)) {
-              withInfo(geoRewrittenOp, s"${geoRewrittenOp.nodeName} is not supported")
+              && !hasExplainInfo(safeOp)) {
+              withInfo(safeOp, s"${safeOp.nodeName} is not supported")
             } else {
-              geoRewrittenOp
+              safeOp
             }
         }
     }
@@ -790,12 +795,13 @@ case class CometExecRule(session: SparkSession)
                 val geoNames = geoProjectList.map(_.name).mkString(",")
                 logInfo(s"[GeoAgg] projResult=${projResult.isDefined} geoList=$geoNames")
                 if (projResult.isDefined) return projResult
+                // Geo projection serde failed — return None so AQE can re-plan with safe-null.
+                return None
               case None =>
+                // Stripped agg serde failed — return None so AQE can re-plan with safe-null.
+                return None
             }
-          // Native geo path failed (projResult=false). Return None so the agg stays as
-          // HashAggregateExec with original geo exprs intact -- AQE will re-plan it in the
-          // final stage where we apply the safe-null fallback on the non-native-child path.
-          case _ => return None
+          case _ =>
         }
         val nativeResult = serde
           .convert(op, builder, childOp: _*)
@@ -873,6 +879,35 @@ case class CometExecRule(session: SparkSession)
         s"Native support for operator $opName is disabled. " +
           s"Set ${handler.enabledConfig.get.key}=true to enable it.")
       false
+    }
+  }
+
+  /**
+   * Replace every geo sub-expression in `plan`'s expressions with a type-safe literal so that
+   * JVM codegen never calls geo.eval() -> CometGeoFallback.notSupported(). Applies to ALL
+   * operator types (ProjectExec, FilterExec, SortExec, HashAggregateExec, etc.).
+   *
+   * Replacement rules:
+   *   - A geo expr whose parent is Alias: the whole Alias gets a safe-literal child.
+   *   - A bare geo expr (no Alias wrapper, e.g. in a Filter predicate): replaced directly.
+   *   - StringType result -> Literal("") (toprettystring output is NOT NULL).
+   *   - Boolean predicates (st_contains, st_intersects, ...) -> Literal(true) so filters pass.
+   *   - Other types (BinaryType geo WKB, DoubleType measurements) -> Literal(null, dataType).
+   *
+   * Returns the plan unchanged if it carries no geo expressions.
+   */
+  private def safeGeoFallback(plan: SparkPlan): SparkPlan = {
+    val hasGeo = plan.expressions.exists(CometGeoExtractFromAggRule.containsGeoExpr)
+    if (!hasGeo) return plan
+    logInfo(s"[GeoRevertFallback] replacing geo exprs with safe literals in ${plan.nodeName}")
+    // transformExpressions is bottom-up: inner geo nodes are replaced first.
+    // CometGeoExpression nodes become safe literals; Alias wrappers are untouched
+    // (they still wrap the safe literal, preserving exprId/qualifier).
+    // Boolean predicates (st_contains etc.) get Literal(true) so filters keep passing.
+    plan.transformExpressions { case e: CometGeoExpression =>
+      if (e.dataType == StringType) Literal("")
+      else if (e.dataType == BooleanType) Literal(true)
+      else Literal(null, e.dataType)
     }
   }
 
