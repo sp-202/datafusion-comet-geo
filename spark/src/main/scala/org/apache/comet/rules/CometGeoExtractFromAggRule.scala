@@ -20,12 +20,18 @@
 package org.apache.comet.rules
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, Expression, NamedExpression}
+import org.apache.spark.sql.catalyst.expressions.{
+  Alias,
+  Attribute,
+  Expression,
+  NamedExpression,
+  ToPrettyString
+}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.execution.aggregate.HashAggregateExec
 
-import org.apache.comet.expressions.CometGeoExpression
+import org.apache.comet.expressions.{CometGeoExpression, StAsText}
 
 /**
  * Physical plan rule helper for extracting geo expressions out of HashAggregateExec
@@ -72,18 +78,24 @@ object CometGeoExtractFromAggRule {
     val (geoExprs, plainExprs) =
       agg.resultExpressions.partition(e => containsGeoExpr(unwrapAlias(e)))
 
-    val strippedAgg = agg.copy(resultExpressions = plainExprs)
+    // When show() wraps results in ToPrettyString(expr, tz), the plain exprs also carry the
+    // wrapper. Strip ToPrettyString from plain exprs so the stripped aggregate can serialize.
+    val strippedPlainExprs = plainExprs.map(stripToPrettyString)
+    val strippedAgg = agg.copy(resultExpressions = strippedPlainExprs)
 
     // Build substitution: alias.child (e.g. avg(lon)#378) -> alias.toAttribute (avg_lon#374)
-    val subst: Map[Expression, Attribute] = plainExprs.collect { case a: Alias =>
+    val subst: Map[Expression, Attribute] = strippedPlainExprs.collect { case a: Alias =>
       a.child -> a.toAttribute
     }.toMap
 
     val rewrittenGeoExprs: Seq[NamedExpression] = geoExprs.map { e =>
-      substituteRefs(e, subst).asInstanceOf[NamedExpression]
+      val substituted = substituteRefs(e, subst)
+      // ToPrettyString(geo, tz) -> StAsText(geo): produce WKT string natively for show().
+      replaceToPrettyStringWithAsText(substituted).asInstanceOf[NamedExpression]
     }
 
-    val geoProjectList: Seq[NamedExpression] = plainExprs.map(_.toAttribute) ++ rewrittenGeoExprs
+    val geoProjectList: Seq[NamedExpression] =
+      strippedPlainExprs.map(_.toAttribute) ++ rewrittenGeoExprs
 
     (strippedAgg, geoProjectList)
   }
@@ -93,6 +105,21 @@ object CometGeoExtractFromAggRule {
       case Some(attr) => attr
       case None => expr.mapChildren(substituteRefs(_, subst))
     }
+
+  // Strip ToPrettyString wrappers from a NamedExpression so the stripped aggregate can serialize.
+  // Alias(ToPrettyString(child, tz), name) -> Alias(child, name) preserving exprId.
+  private def stripToPrettyString(e: NamedExpression): NamedExpression = e match {
+    case a @ Alias(ToPrettyString(child, _), name) =>
+      Alias(child, name)(a.exprId, a.qualifier)
+    case other => other
+  }
+
+  // Replace ToPrettyString(geoExpr, _) nodes with StAsText(geoExpr) so that show()-style
+  // display plans produce WKT strings natively instead of falling back to safe-null.
+  private def replaceToPrettyStringWithAsText(expr: Expression): Expression = expr match {
+    case ToPrettyString(child, _) if containsGeoExpr(child) => StAsText(child)
+    case other => other.mapChildren(replaceToPrettyStringWithAsText)
+  }
 
   def unwrapAlias(e: NamedExpression): Expression = e match {
     case Alias(child, _) => child
