@@ -149,20 +149,26 @@ case class CometExecRule(session: SparkSession)
    * Comet columnar shuffle.
    */
   private def revertRedundantColumnarShuffle(plan: SparkPlan): SparkPlan = {
-    def isAggregate(p: SparkPlan): Boolean =
-      p.isInstanceOf[HashAggregateExec] || p.isInstanceOf[ObjectHashAggregateExec]
+    // A JVM aggregate that contains geo in its resultExpressions is NOT a pure JVM op:
+    // CometExecRule will convert it via the geo extraction path. Do not revert the shuffle.
+    def isJvmOnlyAggregate(p: SparkPlan): Boolean = p match {
+      case agg: HashAggregateExec =>
+        !CometGeoExtractFromAggRule.hasGeoInResults(agg)
+      case _: ObjectHashAggregateExec => true
+      case _ => false
+    }
 
     def isRedundantShuffle(child: SparkPlan): Boolean = child match {
       case s: CometShuffleExchangeExec =>
-        s.shuffleType == CometColumnarShuffle && isAggregate(s.child)
+        s.shuffleType == CometColumnarShuffle && isJvmOnlyAggregate(s.child)
       case _ => false
     }
 
     plan.transform {
-      case op if isAggregate(op) && op.children.exists(isRedundantShuffle) =>
+      case op if isJvmOnlyAggregate(op) && op.children.exists(isRedundantShuffle) =>
         val newChildren = op.children.map {
           case s: CometShuffleExchangeExec
-              if s.shuffleType == CometColumnarShuffle && isAggregate(s.child) =>
+              if s.shuffleType == CometColumnarShuffle && isJvmOnlyAggregate(s.child) =>
             val reverted =
               s.originalPlan.withNewChildren(Seq(s.child)).asInstanceOf[ShuffleExchangeExec]
             reverted.setTagValue(CometExecRule.SKIP_COMET_SHUFFLE_TAG, ())
