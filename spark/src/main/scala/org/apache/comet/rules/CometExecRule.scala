@@ -706,19 +706,28 @@ case class CometExecRule(session: SparkSession)
               OperatorOuterClass.Operator.newBuilder().setPlanId(stripped.id)
             childOp.foreach(strippedBuilder.addChildren)
             val aggSerde = serde.asInstanceOf[CometOperatorSerde[HashAggregateExec]]
-            return aggSerde
-              .convert(stripped, strippedBuilder, childOp: _*)
-              .flatMap { aggNativeOp =>
-                val cometAgg = aggSerde.createExec(aggNativeOp, stripped)
-                // Build a ProjectExec wrapping the native agg so CometProjectExec.convert
-                // can serialize geo exprs against the agg's output attributes.
-                val projExec = ProjectExec(geoProjectList, cometAgg)
-                val projBuilder =
-                  OperatorOuterClass.Operator.newBuilder().setPlanId(projExec.id)
-                CometProjectExec
-                  .convert(projExec, projBuilder, aggNativeOp)
-                  .map(projNativeOp => CometProjectExec.createExec(projNativeOp, projExec))
+            val aggNativeOpt = aggSerde.convert(stripped, strippedBuilder, childOp: _*)
+            if (aggNativeOpt.isEmpty) {
+              logInfo(s"[GeoAgg] aggSerde.convert FAILED for stripped agg: $stripped")
+            }
+            return aggNativeOpt.flatMap { aggNativeOp =>
+              val cometAgg = aggSerde.createExec(aggNativeOp, stripped)
+              // Build a ProjectExec wrapping the native agg so CometProjectExec.convert
+              // can serialize geo exprs against the agg's output attributes.
+              val projExec = ProjectExec(geoProjectList, cometAgg)
+              val projBuilder =
+                OperatorOuterClass.Operator.newBuilder().setPlanId(projExec.id)
+              logInfo(
+                s"[GeoAgg] projExec.child.output=${projExec.child.output} " +
+                  s"geoProjectList=$geoProjectList")
+              val projResult = CometProjectExec
+                .convert(projExec, projBuilder, aggNativeOp)
+                .map(projNativeOp => CometProjectExec.createExec(projNativeOp, projExec))
+              if (projResult.isEmpty) {
+                logInfo(s"[GeoAgg] CometProjectExec.convert FAILED for projExec: $projExec")
               }
+              projResult
+            }
           case _ =>
         }
         return serde
