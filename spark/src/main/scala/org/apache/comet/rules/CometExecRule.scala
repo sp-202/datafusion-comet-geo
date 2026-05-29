@@ -249,6 +249,16 @@ case class CometExecRule(session: SparkSession)
   // spotless:on
   private def transform(plan: SparkPlan): SparkPlan = {
     def convertNode(op: SparkPlan): SparkPlan = op match {
+      // Geo CometProjectExec: on AQE re-plans the child nativeOp may be stale (rebuilt after
+      // stage materialisation). Unwrap back to ProjectExec so it is re-converted fresh with the
+      // current child, picking up the updated nativeOp chain. The projectList and output are
+      // preserved; only the child is taken from the current (already-updated) CometProjectExec.
+      case cp: CometProjectExec
+          if cp.projectList.exists(e =>
+            CometGeoExtractFromAggRule.containsGeoExpr(
+              CometGeoExtractFromAggRule.unwrapAlias(e))) =>
+        convertNode(ProjectExec(cp.projectList, cp.child))
+
       // Fully native scan for V1. CometScanExec must always convert to a native scan; the JVM
       // fallback path has been removed. If conversion fails, fall back to the original Spark scan.
       case scan: CometScanExec =>
