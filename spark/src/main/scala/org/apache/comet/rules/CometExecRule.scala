@@ -956,6 +956,12 @@ case class CometExecRule(session: SparkSession)
 
     val newChildren = op.children.map {
       case child: CometNativeExec => child
+      // CometSparkToColumnarExec already produces Arrow batches. Wrap it directly in
+      // CometScanWrapper (not CometSparkToColumnarExec) so we get a CometNativeExec leaf
+      // without double-wrapping: CometScanWrapper(nativeOp, existingBridge) is correct;
+      // adding another CometSparkToColumnarExec around it would re-convert Arrow->Arrow.
+      case child: CometSparkToColumnarExec =>
+        convertToComet(child, CometScanWrapper).getOrElse(child)
       case child if canWrapWithR2C(child) =>
         // Reuse the same CometSink path used by shouldApplySparkToColumnar for leaf scans:
         //   CometScanWrapper(nativeOp, CometSparkToColumnarExec(child))
@@ -993,11 +999,7 @@ case class CometExecRule(session: SparkSession)
       case c if c.getTagValue(CometExecRule.COMET_UNSAFE_PARTIAL).isDefined => false
       // Reverted Columnar Shuffle: already explicitly de-Cometed by AQE.
       case c if c.getTagValue(CometExecRule.SKIP_COMET_SHUFFLE_TAG).isDefined => false
-      // CometSparkToColumnarExec (shown as CometSparkColumnarToColumnar when child is columnar)
-      // is a JVM-to-Arrow bridge that is safe to wrap in a CometScanWrapper so that native
-      // operators above it see a CometNativeExec child with a proper nativeOp proto chain.
-      case _: CometSparkToColumnarExec => true
-      // Other CometPlan nodes - don't double-wrap.
+      // Already a CometPlan - don't double-wrap.
       case _: CometPlan => false
       // Geo Final aggregate: st_point has no JVM eval(). Wrapping it in CometSparkToColumnarExec
       // would cause TungstenAggregationIterator to call st_point.eval() -> CometGeoFallback crash.
