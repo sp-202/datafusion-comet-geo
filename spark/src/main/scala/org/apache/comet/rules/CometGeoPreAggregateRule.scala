@@ -21,6 +21,7 @@ package org.apache.comet.rules
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, Expression, NamedExpression}
+import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, LogicalPlan, Project, Window}
 import org.apache.spark.sql.catalyst.rules.Rule
 
@@ -53,14 +54,24 @@ case class CometGeoPreAggregateRule(session: SparkSession) extends Rule[LogicalP
   // ---- Aggregate -----------------------------------------------------------
 
   private def hasGeoInAggregateExprs(agg: Aggregate): Boolean = {
-    val allExprs = agg.groupingExpressions ++ agg.aggregateExpressions.flatMap(_.children)
-    allExprs.exists(containsGeo)
+    // Only match geo that is INSIDE an AggregateExpression's arguments (e.g. avg(st_area(...))).
+    // Geo that wraps agg outputs (e.g. st_point(avg(lon), avg(lat))) is handled by
+    // hasGeoInAggregateResults - matching it here causes a pre-project below the agg
+    // which tries to evaluate st_point before avg is computed.
+    val aggFuncArgs = agg.aggregateExpressions.flatMap(collectAggFuncArgs)
+    val inputExprs = agg.groupingExpressions ++ aggFuncArgs
+    inputExprs.exists(containsGeo)
+  }
+
+  /** Collect arguments of AggregateExpression nodes - the expressions fed INTO agg functions. */
+  private def collectAggFuncArgs(expr: Expression): Seq[Expression] = expr match {
+    case ae: AggregateExpression => ae.aggregateFunction.children
+    case other => other.children.flatMap(collectAggFuncArgs)
   }
 
   private def rewriteAggregate(agg: Aggregate): Aggregate = {
-    val (newChild, subst) = liftGeoExprs(
-      agg.child,
-      agg.groupingExpressions ++ agg.aggregateExpressions.flatMap(_.children))
+    val aggFuncArgs = agg.aggregateExpressions.flatMap(collectAggFuncArgs)
+    val (newChild, subst) = liftGeoExprs(agg.child, agg.groupingExpressions ++ aggFuncArgs)
 
     val newGrouping = agg.groupingExpressions.map(replaceGeo(_, subst))
     val newAggExprs =
